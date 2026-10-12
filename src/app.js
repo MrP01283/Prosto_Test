@@ -1,13 +1,14 @@
 import { CONFIG } from './config.js';
-import { uid, clone, escapeHTML as h, normalize, newQuiz, newQuestion, questionErrors, quizErrors, parseQuestionBlock, copyQuestion, mergeQuestions, prepareQuestions, allowsQuestionRange, normalizeQuestionRange, makeResult, publishedQuiz, draftFromPublic, formatDuration } from './core.js';
+import { uid, clone, escapeHTML as h, normalize, newQuiz, newQuestion, questionErrors, quizErrors, parseQuestionBlock, parseQuestionBatch, copyQuestion, mergeQuestions, prepareQuestions, allowsQuestionRange, normalizeQuestionRange, makeResult, publishedQuiz, draftFromPublic, formatDuration } from './core.js';
 import { db, requestPersistentStorage } from './storage.js';
 import { GitHub, loadPublicCatalog } from './github.js';
+import { isCreatorUnlocked, isCreatorRoute, unlockCreator, lockCreator } from './creator.js';
 
 const app = document.querySelector('#app');
 const dialog = document.querySelector('#dialog');
 const github = new GitHub();
 const state = {catalog:{schemaVersion:1,tests:[]}, remote:null, drafts:[], attempts:[], publicError:'', storageError:'', editor:null, selected:null, startSelection:null, route:'', attempt:null, result:null, busy:false, filter:'all', search:'', review:'all', saving:false, saveError:'', unsaved:false};
-let saveTimer, saveQueue = Promise.resolve(), editVersion = 0, toastTimer, routeVersion = 0, pendingConnection, copyState, pasteState, confirmation, connecting=false;
+let saveTimer, saveQueue = Promise.resolve(), editVersion = 0, toastTimer, routeVersion = 0, pendingConnection, copyState, pasteState, batchState, confirmation, connecting=false;
 const date = value => new Intl.DateTimeFormat('ru', {day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}).format(new Date(value));
 const link = path => `#${path}`;
 const btn = (text, action, cls='', attrs='') => `<button class="button ${cls}" data-action="${action}" ${attrs}>${text}</button>`;
@@ -25,12 +26,25 @@ function toast(text) {
 function errorMessage(error) { return error instanceof Error ? error.message : 'Не удалось выполнить действие. Повторите попытку.'; }
 function themeButton() {return `<button class="icon-btn" data-action="theme" aria-label="${document.documentElement.dataset.theme==='dark'?'Светлая':'Тёмная'} тема" title="Переключить тему">${document.documentElement.dataset.theme==='dark'?'☀':'☾'}</button>`;}
 function header(active='catalog', quiz=false) {
-  return `<header class="header"><a class="brand" href="#/catalog"><img src="./assets/favicon.svg" alt="">Просто Тест</a>${quiz ? `<span class="muted small crumb">${h(state.attempt?.quiz.title ?? 'Прохождение теста')}</span>` : `<nav class="nav" aria-label="Основная навигация"><a class="${active==='catalog'?'active':''}" href="#/catalog">Все тесты</a><a class="${active==='history'?'active':''}" href="#/history">История</a>${active==='admin'?'<a class="active" href="#/admin">Мои тесты</a>':''}</nav>`}<div class="header-end">${quiz?'':active==='admin'?btn(github.connected?'GitHub подключён':'Подключить GitHub',github.connected?'account':'connect','subtle editor-only'):routeLink('Для создателя','/admin','subtle')}${themeButton()}</div></header>`;
+  return `<header class="header"><a class="brand" href="#/catalog"><img src="./assets/favicon.svg" alt="">Просто Тест</a>${quiz ? `<span class="muted small crumb">${h(state.attempt?.quiz.title ?? 'Прохождение теста')}</span>` : `<nav class="nav" aria-label="Основная навигация"><a class="${active==='catalog'?'active':''}" href="#/catalog">Все тесты</a><a class="${active==='history'?'active':''}" href="#/history">История</a>${active==='admin'?'<a class="active" href="#/admin">Мои тесты</a>':''}</nav>`}<div class="header-end">${quiz?'':active==='admin'?btn(github.connected?'GitHub подключён':'Подключить GitHub',github.connected?'account':'connect','subtle editor-only')+btn('Выйти','creator-logout','subtle editor-only'):routeLink('Для создателя','/admin','subtle')}${themeButton()}</div></header>`;
 }
 function footer() {return `<footer class="footer"><span>Просто Тест · учитесь в своём темпе</span><span>История сохраняется в вашем браузере</span></footer>`;}
 function setContent(content, active='catalog', quiz=false) {
   app.innerHTML = header(active,quiz)+content+(quiz?'':footer());
   document.title=(document.querySelector('main h1')?.textContent || (active==='admin'?'Конструктор':'Просто Тест'))+' · Просто Тест';
+}
+function creatorLoginPage() {
+  setContent(`<main id="main" class="page narrow"><section class="card creator-login"><div class="eyebrow">Для создателя</div><h1>Вход в конструктор</h1><p class="muted">Введите пароль. Вход сохранится до закрытия этой вкладки.</p><form id="creator-login-form"><label class="field" for="creator-password">Пароль</label><input class="input" id="creator-password" name="creator-password" type="password" autocomplete="current-password" required><div id="creator-login-error" class="bad-text small mt-sm" role="alert"></div><button class="button primary full mt" type="submit">Войти</button></form>${routeLink('К тестам','/catalog','full mt-sm')}</section></main>`,'creator-login');
+  document.querySelector('#creator-password').focus({preventScroll:true});
+}
+async function submitCreatorLogin(form) {
+  const field=form.querySelector('#creator-password'),button=form.querySelector('[type=submit]'),box=form.querySelector('#creator-login-error');
+  const password=field.value,version=routeVersion;field.value='';button.disabled=true;box.textContent='';
+  try {
+    if(await unlockCreator(password)){if(version===routeVersion)await route();}
+    else {box.textContent='Неверный пароль. Попробуйте ещё раз.';field.focus();}
+  } catch {box.textContent='Не удалось проверить пароль. Обновите страницу и повторите попытку.';}
+  finally {if(button.isConnected)button.disabled=false;}
 }
 function storageNotice() {return state.storageError?notice(h(state.storageError),'error'):'';}
 
@@ -74,7 +88,7 @@ function editorPage() {
   const listScroll = sameQuiz ? oldList.scrollTop : 0;
   const pageScroll = sameQuiz ? {x:window.scrollX,y:window.scrollY} : null;
   const restoreFocus = sameQuiz && oldList.contains(document.activeElement);
-  setContent(`<main id="main"><div class="desktop-hint card empty"><h2>Откройте конструктор на компьютере</h2><p>Проходить тесты можно с телефона. Для создания вопросов нужен широкий экран.</p>${routeLink('К тестам','/catalog','primary')}</div><div class="editor-top between wrap"><div><div class="eyebrow">${quiz.baseRevision?'Редактирование теста':'Черновик'}</div><p class="editor-title">${h(quiz.title||'Новый тест')}</p><span id="save-status" class="saved">${state.unsaved?'Сохраняем…':'✓ Сохранено в этом браузере'}</span></div><div class="editor-actions">${routeLink('Мои тесты','/admin')}${btn('Предпросмотр','preview')}${btn(quiz.baseRevision?'Опубликовать правки':'Опубликовать','publish','primary','data-remote')}</div></div><div class="editor-layout"><aside class="card editor-list"><div class="between"><h3>Вопросы</h3><span class="pill" id="question-count">${count}</span></div><div id="question-list" class="question-list" data-quiz-id="${h(quiz.id)}">${questionList()}</div><div class="stack">${btn('＋ Новый вопрос','add-question','full')}${btn('Вставить полный вопрос','paste','subtle full')}${btn('Из другого теста','copy','full')}</div></aside><section class="card editor-main">${question?`<div class="between wrap"><div><div class="eyebrow">Один правильный ответ</div><h2 class="mt-sm">Вопрос ${quiz.questions.indexOf(question)+1}</h2></div><div class="row">${btn('↑','move-up','compact',`aria-label="Переместить вопрос вверх" ${quiz.questions.indexOf(question)===0?'disabled':''}`)}${btn('↓','move-down','compact',`aria-label="Переместить вопрос вниз" ${quiz.questions.indexOf(question)===count-1?'disabled':''}`)}${btn('Удалить вопрос','remove-question','compact danger')}</div></div><label class="field mt" for="question-text">Текст вопроса</label><textarea id="question-text" name="question-text" rows="3" placeholder="Введите вопрос">${h(question.text)}</textarea><div class="between mt"><h3>Варианты ответа</h3><span class="muted small">Минимум два</span></div><div id="option-rows">${optionRows(question)}</div><div class="row wrap mt">${btn('＋ Добавить вариант','add-option')}${btn('Заменить из текста','paste-replace','subtle')}</div><p class="muted small mt">Кружком слева отметьте правильный вариант. При добавлении нового вопроса выбран первый.</p>`:empty('Добавьте первый вопрос','Введите его вручную или вставьте вопрос и все ответы одним блоком.',btn('＋ Новый вопрос','add-question','primary'))}</section><aside class="card editor-settings"><h3>Настройки теста</h3><div class="setting"><label class="field" for="quiz-title">Название</label><input class="input" id="quiz-title" name="quiz-title" value="${h(quiz.title)}" placeholder="Название теста"><label class="field mt" for="quiz-description">Описание · необязательно</label><textarea id="quiz-description" name="quiz-description" rows="2" placeholder="Кратко о тесте">${h(quiz.description)}</textarea></div><div class="setting"><div class="setting-title">Вопросов в попытке</div><label class="check"><input type="radio" name="count-mode" value="all" ${quiz.settings.questionCount===null?'checked':''}>Все (${count})</label><label class="check mt-sm"><input type="radio" name="count-mode" value="part" ${quiz.settings.questionCount!==null?'checked':''} ${count<2?'disabled':''}>Случайная часть</label><div id="count-controls" class="${quiz.settings.questionCount===null?'hidden':''}"><input type="range" name="question-count-range" min="1" max="${Math.max(1,count-1)}" value="${quiz.settings.questionCount??Math.max(1,count-1)}" aria-label="Количество вопросов"><input class="input" type="number" name="question-count-number" min="1" max="${Math.max(1,count-1)}" value="${quiz.settings.questionCount??Math.max(1,count-1)}" aria-label="Точное количество вопросов"></div><label class="check mt"><input type="checkbox" name="allow-question-range" ${allowsQuestionRange(quiz)?'checked':''} ${quiz.settings.questionCount!==null?'disabled':''}>Разрешить выбор диапазона участнику</label><p>${quiz.settings.questionCount!==null?'Выбор диапазона недоступен при случайной части. Выберите «Все», чтобы включить его.':'Участник сможет выбрать номера вопросов перед началом. Настройка применяется после публикации.'}</p></div><div class="setting"><label class="check"><input type="checkbox" name="shuffle-questions" ${allowsQuestionRange(quiz)||quiz.settings.shuffleQuestions?'checked':''} ${allowsQuestionRange(quiz)?'disabled':''}>Перемешивать вопросы</label><label class="check mt"><input type="checkbox" name="shuffle-options" ${quiz.settings.shuffleOptions?'checked':''}>Перемешивать ответы</label><p>${allowsQuestionRange(quiz)?'Выбранный участником диапазон всегда перемешивается при прохождении.':'Настройки действуют при прохождении.'} Порядок в конструкторе сохраняется.</p></div><div class="setting">${btn('Создать отдельную копию','duplicate','full')}<p>Полезно для нового теста или сохранения правок при конфликте публикации.</p></div></aside></div></main>`,'admin');
+  setContent(`<main id="main"><div class="desktop-hint card empty"><h2>Откройте конструктор на компьютере</h2><p>Проходить тесты можно с телефона. Для создания вопросов нужен широкий экран.</p>${routeLink('К тестам','/catalog','primary')}</div><div class="editor-top between wrap"><div><div class="eyebrow">${quiz.baseRevision?'Редактирование теста':'Черновик'}</div><p class="editor-title">${h(quiz.title||'Новый тест')}</p><span id="save-status" class="saved">${state.unsaved?'Сохраняем…':'✓ Сохранено в этом браузере'}</span></div><div class="editor-actions">${routeLink('Мои тесты','/admin')}${btn('Предпросмотр','preview')}${btn(quiz.baseRevision?'Опубликовать правки':'Опубликовать','publish','primary','data-remote')}</div></div><div class="editor-layout"><aside class="card editor-list"><div class="between"><h3>Вопросы</h3><span class="pill" id="question-count">${count}</span></div><div id="question-list" class="question-list" data-quiz-id="${h(quiz.id)}">${questionList()}</div><div class="stack">${btn('＋ Новый вопрос','add-question','full')}${btn('Вставить полный вопрос','paste','subtle full')}${btn('Вставить блок вопросов','paste-batch','subtle full')}${btn('Из другого теста','copy','full')}</div></aside><section class="card editor-main">${question?`<div class="between wrap"><div><div class="eyebrow">Один правильный ответ</div><h2 class="mt-sm">Вопрос ${quiz.questions.indexOf(question)+1}</h2></div><div class="row">${btn('↑','move-up','compact',`aria-label="Переместить вопрос вверх" ${quiz.questions.indexOf(question)===0?'disabled':''}`)}${btn('↓','move-down','compact',`aria-label="Переместить вопрос вниз" ${quiz.questions.indexOf(question)===count-1?'disabled':''}`)}${btn('Удалить вопрос','remove-question','compact danger')}</div></div><label class="field mt" for="question-text">Текст вопроса</label><textarea id="question-text" name="question-text" rows="3" placeholder="Введите вопрос">${h(question.text)}</textarea><div class="between mt"><h3>Варианты ответа</h3><span class="muted small">Минимум два</span></div><div id="option-rows">${optionRows(question)}</div><div class="row wrap mt">${btn('＋ Добавить вариант','add-option')}${btn('Заменить из текста','paste-replace','subtle')}</div><p class="muted small mt">Кружком слева отметьте правильный вариант. При добавлении нового вопроса выбран первый.</p>`:empty('Добавьте первый вопрос','Введите его вручную или вставьте вопрос и все ответы одним блоком.',btn('＋ Новый вопрос','add-question','primary'))}</section><aside class="card editor-settings"><h3>Настройки теста</h3><div class="setting"><label class="field" for="quiz-title">Название</label><input class="input" id="quiz-title" name="quiz-title" value="${h(quiz.title)}" placeholder="Название теста"><label class="field mt" for="quiz-description">Описание · необязательно</label><textarea id="quiz-description" name="quiz-description" rows="2" placeholder="Кратко о тесте">${h(quiz.description)}</textarea></div><div class="setting"><div class="setting-title">Вопросов в попытке</div><label class="check"><input type="radio" name="count-mode" value="all" ${quiz.settings.questionCount===null?'checked':''}>Все (${count})</label><label class="check mt-sm"><input type="radio" name="count-mode" value="part" ${quiz.settings.questionCount!==null?'checked':''} ${count<2?'disabled':''}>Случайная часть</label><div id="count-controls" class="${quiz.settings.questionCount===null?'hidden':''}"><input type="range" name="question-count-range" min="1" max="${Math.max(1,count-1)}" value="${quiz.settings.questionCount??Math.max(1,count-1)}" aria-label="Количество вопросов"><input class="input" type="number" name="question-count-number" min="1" max="${Math.max(1,count-1)}" value="${quiz.settings.questionCount??Math.max(1,count-1)}" aria-label="Точное количество вопросов"></div><label class="check mt"><input type="checkbox" name="allow-question-range" ${allowsQuestionRange(quiz)?'checked':''} ${quiz.settings.questionCount!==null?'disabled':''}>Разрешить выбор диапазона участнику</label><p>${quiz.settings.questionCount!==null?'Выбор диапазона недоступен при случайной части. Выберите «Все», чтобы включить его.':'Участник сможет выбрать номера вопросов перед началом. Настройка применяется после публикации.'}</p></div><div class="setting"><label class="check"><input type="checkbox" name="shuffle-questions" ${allowsQuestionRange(quiz)||quiz.settings.shuffleQuestions?'checked':''} ${allowsQuestionRange(quiz)?'disabled':''}>Перемешивать вопросы</label><label class="check mt"><input type="checkbox" name="shuffle-options" ${quiz.settings.shuffleOptions?'checked':''}>Перемешивать ответы</label><p>${allowsQuestionRange(quiz)?'Выбранный участником диапазон всегда перемешивается при прохождении.':'Настройки действуют при прохождении.'} Порядок в конструкторе сохраняется.</p></div><div class="setting">${btn('Создать отдельную копию','duplicate','full')}<p>Полезно для нового теста или сохранения правок при конфликте публикации.</p></div></aside></div></main>`,'admin');
   document.querySelector('#question-list').scrollTop = listScroll;
   if (restoreFocus) document.querySelector('.q-item.active')?.focus({preventScroll:true});
   if (pageScroll) window.scrollTo(pageScroll.x,pageScroll.y);
@@ -150,6 +164,7 @@ function historyPage() {
 
 function showDialog(title, body, actions='') {
   if (dialog.open) closeDialog();
+  dialog.className='';
   dialog.innerHTML=`<div class="dialog-head"><h2 id="dialog-title">${title}</h2><button class="icon-btn" data-action="close-dialog" aria-label="Закрыть окно">×</button></div><div class="dialog-body">${body}</div>${actions?`<div class="dialog-actions">${actions}</div>`:''}`;
   dialog.showModal();
 }
@@ -219,6 +234,31 @@ function updatePaste() {
     document.querySelector('#paste-preview').innerHTML=`<b class="pre">${h(question.text)}</b><ol>${question.options.map((o,i)=>`<li><span class="pre">${h(o.text)}</span>${i===0?'<br><span class="correct-label">✓ Правильный по умолчанию</span>':''}</li>`).join('')}</ol>`;
     document.querySelector('#apply-paste').disabled=false;
   } catch(error) {pasteState.parsed=null;document.querySelector('#paste-preview').textContent=text?errorMessage(error):'Здесь появится вопрос после вставки текста.';document.querySelector('#apply-paste').disabled=true;}
+}
+function openBatchPaste() {
+  batchState=null;
+  showDialog('Вставить блок вопросов',`<p class="muted small">Вставьте несколько пронумерованных вопросов с буквенными вариантами ответа. Они добавятся в конец теста. Первый ответ каждого вопроса станет правильным.</p><div class="preview-split"><div><label class="field" for="batch-text">Исходный текст</label><textarea id="batch-text" class="paste-input batch-input" placeholder="16. Первый вопрос&#10;A) Первый ответ&#10;B) Второй ответ&#10;&#10;17. Следующий вопрос&#10;A) Первый ответ&#10;B) Второй ответ"></textarea><label class="check mt-sm"><input id="batch-strip-prefixes" type="checkbox" checked>Убирать номер вопроса и буквы вариантов ответа</label></div><div><label class="field">Предпросмотр</label><div id="batch-summary" class="small muted mb">Вопросы ещё не добавлены.</div><div id="batch-preview" class="batch-preview">После вставки здесь появятся вопросы.</div></div></div>`,`<div id="batch-actions" class="row wrap">${btn('Отмена','close-dialog')}${btn('Добавить вопросы','apply-batch','primary','disabled')}</div>`);
+  dialog.classList.add('batch-dialog');
+}
+function updateBatchPaste() {
+  const text=document.querySelector('#batch-text').value;
+  const parsed=parseQuestionBatch(text,document.querySelector('#batch-strip-prefixes').checked);
+  batchState=parsed;
+  const summary=document.querySelector('#batch-summary'),preview=document.querySelector('#batch-preview'),actions=document.querySelector('#batch-actions');
+  if(!text.trim()) {batchState=null;summary.textContent='Вопросы ещё не добавлены.';preview.textContent='После вставки здесь появятся вопросы.';actions.innerHTML=btn('Отмена','close-dialog')+btn('Добавить вопросы','apply-batch','primary','disabled');return;}
+  const duplicates=parsed.errors.length?0:mergeQuestions(state.editor.questions,parsed.questions,false,true).skipped;
+  summary.innerHTML=parsed.errors.length?notice(`Добавление остановлено. Исправьте ошибки: ${parsed.errors.length}.`,'error'):`Распознано вопросов: <b>${parsed.questions.length}</b>. Добавятся в конец теста.${duplicates?notice(`Повторов по тексту: ${duplicates}. Выберите, пропустить их или добавить все.`,'warning'):''}`;
+  const entryErrors=new Set(parsed.entries.flatMap(entry=>entry.errors));
+  const leadingErrors=parsed.errors.filter(error=>!entryErrors.has(error));
+  preview.innerHTML=(leadingErrors.length?notice(leadingErrors.map(h).join('<br>'),'error'):'')+parsed.entries.map((entry,index)=>`<details class="batch-question ${entry.errors.length?'invalid':''}" ${entry.errors.length||index===0?'open':''}><summary><b>Вопрос ${index+1}</b><span class="muted small">№${h(entry.sourceNumber)} в тексте · строка ${entry.line}</span></summary>${entry.errors.length?notice(entry.errors.map(h).join('<br>'),'error'):`<p class="pre">${h(entry.question.text)}</p><ol>${entry.question.options.map((o,i)=>`<li class="pre">${h(o.text)}${i===0?'<br><span class="good-text small">✓ Правильный по умолчанию</span>':''}</li>`).join('')}</ol>`}</details>`).join('');
+  actions.innerHTML=btn('Отмена','close-dialog')+(parsed.errors.length?btn('Добавить вопросы','apply-batch','primary','disabled'):duplicates?btn('Пропустить повторы','apply-batch','',`data-duplicates="skip"`)+btn('Добавить все','apply-batch','primary',`data-duplicates="all"`):btn(`Добавить вопросы (${parsed.questions.length})`,'apply-batch','primary'));
+}
+function applyBatchPaste(includeDuplicates=false) {
+  if(!batchState?.questions.length||batchState.errors.length)return;
+  const merged=mergeQuestions(state.editor.questions,batchState.questions,includeDuplicates,true);
+  batchState=null;closeDialog();
+  if(merged.added){state.editor.questions=merged.questions;state.selected=merged.questions[merged.questions.length-merged.added].id;markDirty();editorPage();}
+  toast(`Добавлено: ${merged.added}. Пропущено повторов: ${merged.skipped}.`);
 }
 function openCopy() {
   const sources=allAdminTests().filter(q=>q.id!==state.editor.id&&q.questions.length);
@@ -345,8 +385,13 @@ async function route() {
   const [routePath,query='']=path.split('?');
   const params=new URLSearchParams(query);
   const [section,id]=routePath.slice(1).split('/').map(decodeURIComponent);
+  if(isCreatorRoute(section)) {
+    if(!isCreatorUnlocked()){creatorLoginPage();return;}
+    state.drafts=await db.all('drafts').catch(error=>{state.storageError=errorMessage(error);return state.drafts;});
+    if(version!==routeVersion)return;
+  }
   if(section==='catalog'){catalogPage();}
-  else if(section==='admin'){state.drafts=await db.all('drafts').catch(error=>{state.storageError=errorMessage(error);return state.drafts;});if(version===routeVersion)adminPage();}
+  else if(section==='admin'){adminPage();}
   else if(section==='edit'){
     state.editor=state.editor?.id===id?state.editor:await getDraft(id);
     if(version!==routeVersion)return;
@@ -390,6 +435,10 @@ async function handleAction(action,element) {
     try{localStorage.setItem('prosto-test-theme',theme);}catch{}
     document.querySelectorAll('[data-action=theme]').forEach(el=>{el.textContent=theme==='dark'?'☀':'☾';el.setAttribute('aria-label',theme==='dark'?'Светлая тема':'Тёмная тема');});return;
   }
+  if(action==='creator-logout'){
+    await flushDraft();lockCreator();github.disconnect();state.remote=null;state.drafts=[];state.editor=null;pendingConnection=null;
+    history.replaceState(null,'',link('/admin'));await route();return;
+  }
   if(action==='close-dialog'){closeDialog();return;}
   if(action==='confirm'){const resolve=confirmation;confirmation=null;closeDialog();resolve?.(true);return;}
   if(action==='skip-duplicates'){const resolve=confirmation;confirmation=null;closeDialog();resolve?.('skip');return;}
@@ -419,6 +468,8 @@ async function handleAction(action,element) {
   if(action==='add-option'){currentQuestion().options.push({id:uid(),text:''});markDirty();editorPage();document.querySelectorAll('[data-option]').item(currentQuestion().options.length-1)?.focus();return;}
   if(action==='remove-option'){const q=currentQuestion();if(q.options.length<=2)return;q.options=q.options.filter(o=>o.id!==id);if(q.correctOptionId===id)q.correctOptionId=q.options[0].id;markDirty();editorPage();return;}
   if(action==='move-up'||action==='move-down'){const list=state.editor.questions,i=list.findIndex(q=>q.id===state.selected),j=i+(action==='move-up'?-1:1);if(j<0||j>=list.length)return;[list[i],list[j]]=[list[j],list[i]];markDirty();editorPage();return;}
+  if(action==='paste-batch'){openBatchPaste();return;}
+  if(action==='apply-batch'){applyBatchPaste(element.dataset.duplicates==='all');return;}
   if(action==='paste'||action==='paste-replace'){openPaste(action==='paste-replace');return;}
   if(action==='apply-paste'){
     if(!pasteState.parsed)return;
@@ -466,6 +517,7 @@ document.addEventListener('input',event=>{
   if(el.dataset.rangeBound){updateQuestionRange(el);return;}
   if(el.name==='catalog-search'){state.search=el.value;document.querySelector('#catalog-list').innerHTML=catalogCards();return;}
   if(el.id==='paste-text'||el.id==='strip-prefixes'){updatePaste();return;}
+  if(el.id==='batch-text'||el.id==='batch-strip-prefixes'){updateBatchPaste();return;}
   if(!state.editor)return;
   const q=currentQuestion();
   if(el.name==='quiz-title'){state.editor.title=el.value;document.querySelector('.editor-title').textContent=el.value||'Новый тест';}
@@ -494,6 +546,7 @@ document.addEventListener('change',event=>{
   if(el.dataset.copy){if(el.checked)copyState.selected.add(el.dataset.copy);else copyState.selected.delete(el.dataset.copy);updateCopyCount();}
 });
 document.addEventListener('submit',async event=>{
+  if(event.target.id==='creator-login-form'){event.preventDefault();await submitCreatorLogin(event.target);return;}
   if(event.target.id!=='connect-form')return;event.preventDefault();
   const field=document.querySelector('#github-token'), button=event.target.querySelector('[type=submit]');
   const token=field.value;field.value='';button.disabled=true;button.textContent='Подключаем…';connecting=true;
@@ -506,8 +559,7 @@ window.addEventListener('hashchange',()=>route().catch(reportError));
 window.addEventListener('beforeunload',event=>{if(state.busy||state.unsaved||state.attempt&&!state.attempt.done){event.preventDefault();event.returnValue='';}});
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'&&state.unsaved)saveDraft().catch(reportError);});
 
-const loaded=await Promise.allSettled([loadPublicCatalog(),db.all('drafts'),db.all('attempts')]);
+const loaded=await Promise.allSettled([loadPublicCatalog(),db.all('attempts')]);
 if(loaded[0].status==='fulfilled')state.catalog=loaded[0].value;else state.publicError=errorMessage(loaded[0].reason);
-if(loaded[1].status==='fulfilled')state.drafts=loaded[1].value;else state.storageError=errorMessage(loaded[1].reason);
-if(loaded[2].status==='fulfilled')state.attempts=loaded[2].value;else state.storageError=errorMessage(loaded[2].reason);
+if(loaded[1].status==='fulfilled')state.attempts=loaded[1].value;else state.storageError=errorMessage(loaded[1].reason);
 route().catch(error=>unavailable('Не удалось открыть страницу',errorMessage(error)));

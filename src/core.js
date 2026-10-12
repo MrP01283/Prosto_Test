@@ -60,6 +60,62 @@ export function parseQuestionBlock(text, strip = true) {
   return parsed;
 }
 
+export function parseQuestionBatch(text, strip = true) {
+  const numbered = /^\s*(?:вопрос\s*)?(\d+)[.)]\s*(.*)$/iu;
+  const labelled = /^\s*([A-ZА-ЯЁ]+)[.)]\s*(.*)$/iu;
+  const blocks = [], errors = [];
+  let block;
+  text.replace(/^\uFEFF/u,'').replace(/\r\n?/g,'\n').split('\n').forEach((line,index) => {
+    const start = line.match(numbered);
+    if (start) {
+      block = {sourceNumber:start[1], line:index+1, lines:[line.trim()]};
+      blocks.push(block);
+    } else if (block) block.lines.push(line.trim());
+    else if (line.trim()) errors.push(`Строка ${index+1}: вопрос должен начинаться с номера, например «16. Текст вопроса».`);
+  });
+  const entries = blocks.map(block => {
+    const issues = [], questionLines = [], answers = [], seen = new Set();
+    for (const [index,line] of block.lines.entries()) {
+      const match = index > 0 ? line.match(labelled) : null;
+      if (match) {
+        const label = match[1].toUpperCase();
+        if (seen.has(label)) issues.push(`Строка ${block.line+index}: повторяется метка ответа «${label}».`);
+        seen.add(label);
+        answers.push({label, line:block.line+index, lines:[line], content:[match[2]]});
+      } else if (answers.length) {
+        answers.at(-1).lines.push(line);answers.at(-1).content.push(line);
+      } else questionLines.push(index===0 ? line.replace(questionPrefix,'') : line);
+    }
+    const questionText = questionLines.join('\n').trim();
+    if (!questionText) issues.push('Введите текст вопроса после номера.');
+    if (answers.length < 2) issues.push('Нужны минимум два ответа с буквенными метками, например A) и B).');
+    if (answers.length && !validAnswerLabels(answers.map(answer=>answer.label))) issues.push('Буквы ответов должны идти подряд, начиная с A или А. Проверьте пропущенные метки.');
+    for (const answer of answers) {
+      if (!answer.content.join('\n').trim()) issues.push(`Строка ${answer.line}: вариант «${answer.label}» пустой.`);
+    }
+    const options = answers.map(answer => ({id:uid(), text:(strip ? answer.content : answer.lines).join('\n').trim()}));
+    // Removing the answer portion leaves the original question prefix intact when requested.
+    const originalQuestion = block.lines.slice(0,answers[0] ? answers[0].line-block.line : block.lines.length).join('\n').trim();
+    const question = {id:uid(),text:strip?questionText:originalQuestion,options,correctOptionId:options[0]?.id};
+    const messages = issues.map(issue => `Вопрос №${block.sourceNumber} (строка ${block.line}): ${issue}`);
+    errors.push(...messages);
+    return {...block, question:issues.length?null:question, errors:messages};
+  });
+  if (!blocks.length && !errors.length) errors.push('Вставьте пронумерованные вопросы и ответы с буквенными метками.');
+  return {entries, errors, questions:errors.length?[]:entries.map(entry=>entry.question)};
+}
+
+function validAnswerLabels(labels) {
+  const lookalikes = {'А':'A','В':'B','С':'C','Е':'E','Н':'H','К':'K','М':'M','О':'O','Р':'P','Т':'T','Х':'X','У':'Y'};
+  const reverse = Object.fromEntries(Object.entries(lookalikes).map(([a,b])=>[b,a]));
+  return ['ABCDEFGHIJKLMNOPQRSTUVWXYZ','АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ','АБВГДЕЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ'].some((alphabet,script)=>labels.every((label,index)=>{
+    let expected='',n=index+1;
+    while(n>0){n--;expected=alphabet[n%alphabet.length]+expected;n=Math.floor(n/alphabet.length);}
+    const map=script===0?lookalikes:reverse;
+    return [...label].map(char=>map[char]??char).join('')===expected;
+  }));
+}
+
 export function copyQuestion(question) {
   let correctOptionId;
   const options = question.options.map(o => {
@@ -70,12 +126,13 @@ export function copyQuestion(question) {
   return {id: uid(), text: question.text, options, correctOptionId};
 }
 
-export function mergeQuestions(existing, incoming, includeDuplicates = false) {
-  const seen = new Set(existing.map(q => normalize(q.text)));
+export function mergeQuestions(existing, incoming, includeDuplicates = false, ignoreNumbering = false) {
+  const keyOf = question => normalize(ignoreNumbering ? question.text.replace(questionPrefix,'') : question.text);
+  const seen = new Set(existing.map(keyOf));
   const questions = [...existing];
   let skipped = 0;
   for (const question of incoming) {
-    const key = normalize(question.text);
+    const key = keyOf(question);
     if (!includeDuplicates && seen.has(key)) { skipped++; continue; }
     questions.push(copyQuestion(question));
     seen.add(key);
