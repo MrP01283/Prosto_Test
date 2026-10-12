@@ -11,7 +11,7 @@ export function newQuestion() {
 export function newQuiz() {
   const now = new Date().toISOString();
   return {id: uid(), title: '', description: '', questions: [],
-    settings: {questionCount: null, shuffleQuestions: true, shuffleOptions: true},
+    settings: {questionCount: null, allowQuestionRange: true, shuffleQuestions: true, shuffleOptions: true},
     status: 'draft', createdAt: now, updatedAt: now, baseRevision: null, dirty: true};
 }
 
@@ -31,6 +31,7 @@ export function quizErrors(quiz) {
   quiz.questions.forEach((q, i) => questionErrors(q).forEach(error => errors.push(`Вопрос ${i + 1}: ${error}`)));
   const count = quiz.settings.questionCount;
   if (count !== null && (!Number.isInteger(count) || count < 1 || count > quiz.questions.length)) errors.push('Количество вопросов должно быть от 1 до общего числа вопросов.');
+  if (quiz.settings.allowQuestionRange !== undefined && typeof quiz.settings.allowQuestionRange !== 'boolean') errors.push('Проверьте настройку выбора диапазона вопросов.');
   return errors;
 }
 
@@ -91,21 +92,39 @@ export function shuffle(items, random = Math.random) {
   return copy;
 }
 
-export function prepareQuestions(quiz, random = Math.random) {
+// Missing flags in older catalogs/drafts default to enabled for the full-question mode.
+export function allowsQuestionRange(quiz) {
+  return quiz.settings.questionCount === null && quiz.settings.allowQuestionRange !== false;
+}
+
+export function normalizeQuestionRange(total, range = {}) {
+  if (!Number.isInteger(total) || total < 1) throw new Error('В тесте нет вопросов для выбора.');
+  const bound = (value, fallback) => {
+    const number = value === '' || value == null ? fallback : Number(value);
+    return Number.isFinite(number) ? Math.max(1, Math.min(total, Math.trunc(number))) : fallback;
+  };
+  const from = bound(range.from, 1);
+  return {from, to: Math.max(from, bound(range.to, total))};
+}
+
+export function prepareQuestions(quiz, random = Math.random, range = null) {
   let questions = clone(quiz.questions).map((q, i) => ({...q, originalIndex: i + 1}));
+  const selectedRange = range && allowsQuestionRange(quiz) ? normalizeQuestionRange(questions.length, range) : null;
+  if (selectedRange) questions = questions.slice(selectedRange.from - 1, selectedRange.to);
   const count = quiz.settings.questionCount ?? questions.length;
   // A limited subset is always random; the question-order toggle controls its displayed order.
   if (count < questions.length) questions = shuffle(questions, random).slice(0, count);
-  if (quiz.settings.shuffleQuestions) questions = shuffle(questions, random);
+  if (selectedRange || quiz.settings.shuffleQuestions) questions = shuffle(questions, random);
   else questions.sort((a, b) => a.originalIndex - b.originalIndex);
   if (quiz.settings.shuffleOptions) questions = questions.map(q => ({...q, options: shuffle(q.options, random)}));
   return questions;
 }
 
-export function makeResult(quiz, questions, answers, startedAt, finishedAt = Date.now()) {
+export function makeResult(quiz, questions, answers, startedAt, finishedAt = Date.now(), questionRange = null) {
   const entries = questions.map((q, i) => ({...clone(q), selectedOptionId: answers[i] ?? null, correct: answers[i] === q.correctOptionId}));
   const correct = entries.filter(q => q.correct).length;
   return {id: uid(), quizId: quiz.id, title: quiz.title, revision: quiz.revision ?? null,
+    questionRange: questionRange ? {...normalizeQuestionRange(quiz.questions.length, questionRange), poolSize: quiz.questions.length} : null,
     startedAt, finishedAt, durationMs: Math.max(0, finishedAt - startedAt),
     total: entries.length, correct, wrong: entries.length - correct,
     percent: entries.length ? Math.round(correct / entries.length * 100) : 0, questions: entries};
@@ -114,7 +133,7 @@ export function makeResult(quiz, questions, answers, startedAt, finishedAt = Dat
 export function publishedQuiz(draft, status = 'published') {
   return {id: draft.id, title: draft.title.trim(), description: draft.description.trim(),
     questions: draft.questions.map(q => ({id: q.id, text: q.text.trim(), options: q.options.map(o => ({id: o.id, text: o.text.trim()})), correctOptionId: q.correctOptionId})),
-    settings: clone(draft.settings), status, createdAt: draft.createdAt,
+    settings: {...clone(draft.settings), allowQuestionRange: allowsQuestionRange(draft)}, status, createdAt: draft.createdAt,
     updatedAt: new Date().toISOString(), revision: uid()};
 }
 

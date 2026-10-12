@@ -4,6 +4,6 @@ export const CONFIG = Object.freeze({
   branch: 'main',
   dataPath: 'data/tests.json',
   apiVersion: '2022-11-28',
-  correctDelay: 1500,
+  correctDelay: 700,
   statusInterval: 30000,
 });

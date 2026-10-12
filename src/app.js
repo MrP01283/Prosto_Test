@@ -1,12 +1,12 @@
 import { CONFIG } from './config.js';
-import { uid, clone, escapeHTML as h, normalize, newQuiz, newQuestion, questionErrors, quizErrors, parseQuestionBlock, copyQuestion, mergeQuestions, prepareQuestions, makeResult, publishedQuiz, draftFromPublic, formatDuration } from './core.js';
+import { uid, clone, escapeHTML as h, normalize, newQuiz, newQuestion, questionErrors, quizErrors, parseQuestionBlock, copyQuestion, mergeQuestions, prepareQuestions, allowsQuestionRange, normalizeQuestionRange, makeResult, publishedQuiz, draftFromPublic, formatDuration } from './core.js';
 import { db, requestPersistentStorage } from './storage.js';
 import { GitHub, loadPublicCatalog } from './github.js';
 
 const app = document.querySelector('#app');
 const dialog = document.querySelector('#dialog');
 const github = new GitHub();
-const state = {catalog:{schemaVersion:1,tests:[]}, remote:null, drafts:[], attempts:[], publicError:'', storageError:'', editor:null, selected:null, route:'', attempt:null, result:null, busy:false, filter:'all', search:'', review:'all', saving:false, saveError:'', unsaved:false};
+const state = {catalog:{schemaVersion:1,tests:[]}, remote:null, drafts:[], attempts:[], publicError:'', storageError:'', editor:null, selected:null, startSelection:null, route:'', attempt:null, result:null, busy:false, filter:'all', search:'', review:'all', saving:false, saveError:'', unsaved:false};
 let saveTimer, saveQueue = Promise.resolve(), editVersion = 0, toastTimer, routeVersion = 0, pendingConnection, copyState, pasteState, confirmation, connecting=false;
 const date = value => new Intl.DateTimeFormat('ru', {day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}).format(new Date(value));
 const link = path => `#${path}`;
@@ -69,7 +69,15 @@ function optionRows(question) {
 }
 function editorPage() {
   const quiz = state.editor, question = currentQuestion(), count = quiz.questions.length;
-  setContent(`<main id="main"><div class="desktop-hint card empty"><h2>Откройте конструктор на компьютере</h2><p>Проходить тесты можно с телефона. Для создания вопросов нужен широкий экран.</p>${routeLink('К тестам','/catalog','primary')}</div><div class="editor-top between wrap"><div><div class="eyebrow">${quiz.baseRevision?'Редактирование теста':'Черновик'}</div><p class="editor-title">${h(quiz.title||'Новый тест')}</p><span id="save-status" class="saved">${state.unsaved?'Сохраняем…':'✓ Сохранено в этом браузере'}</span></div><div class="editor-actions">${routeLink('Мои тесты','/admin')}${btn('Предпросмотр','preview')}${btn(quiz.baseRevision?'Опубликовать правки':'Опубликовать','publish','primary','data-remote')}</div></div><div class="editor-layout"><aside class="card editor-list"><div class="between"><h3>Вопросы</h3><span class="pill" id="question-count">${count}</span></div><div id="question-list" class="question-list">${questionList()}</div><div class="stack">${btn('＋ Новый вопрос','add-question','full')}${btn('Вставить полный вопрос','paste','subtle full')}${btn('Из другого теста','copy','full')}</div></aside><section class="card editor-main">${question?`<div class="between wrap"><div><div class="eyebrow">Один правильный ответ</div><h2 class="mt-sm">Вопрос ${quiz.questions.indexOf(question)+1}</h2></div><div class="row">${btn('↑','move-up','compact',`aria-label="Переместить вопрос вверх" ${quiz.questions.indexOf(question)===0?'disabled':''}`)}${btn('↓','move-down','compact',`aria-label="Переместить вопрос вниз" ${quiz.questions.indexOf(question)===count-1?'disabled':''}`)}${btn('Удалить вопрос','remove-question','compact danger')}</div></div><label class="field mt" for="question-text">Текст вопроса</label><textarea id="question-text" name="question-text" rows="3" placeholder="Введите вопрос">${h(question.text)}</textarea><div class="between mt"><h3>Варианты ответа</h3><span class="muted small">Минимум два</span></div><div id="option-rows">${optionRows(question)}</div><div class="row wrap mt">${btn('＋ Добавить вариант','add-option')}${btn('Заменить из текста','paste-replace','subtle')}</div><p class="muted small mt">Кружком слева отметьте правильный вариант. При добавлении нового вопроса выбран первый.</p>`:empty('Добавьте первый вопрос','Введите его вручную или вставьте вопрос и все ответы одним блоком.',btn('＋ Новый вопрос','add-question','primary'))}</section><aside class="card editor-settings"><h3>Настройки теста</h3><div class="setting"><label class="field" for="quiz-title">Название</label><input class="input" id="quiz-title" name="quiz-title" value="${h(quiz.title)}" placeholder="Название теста"><label class="field mt" for="quiz-description">Описание · необязательно</label><textarea id="quiz-description" name="quiz-description" rows="2" placeholder="Кратко о тесте">${h(quiz.description)}</textarea></div><div class="setting"><div class="setting-title">Вопросов в попытке</div><label class="check"><input type="radio" name="count-mode" value="all" ${quiz.settings.questionCount===null?'checked':''}>Все (${count})</label><label class="check mt-sm"><input type="radio" name="count-mode" value="part" ${quiz.settings.questionCount!==null?'checked':''} ${count<2?'disabled':''}>Случайная часть</label><div id="count-controls" class="${quiz.settings.questionCount===null?'hidden':''}"><input type="range" name="question-count-range" min="1" max="${Math.max(1,count-1)}" value="${quiz.settings.questionCount??Math.max(1,count-1)}" aria-label="Количество вопросов"><input class="input" type="number" name="question-count-number" min="1" max="${Math.max(1,count-1)}" value="${quiz.settings.questionCount??Math.max(1,count-1)}" aria-label="Точное количество вопросов"></div></div><div class="setting"><label class="check"><input type="checkbox" name="shuffle-questions" ${quiz.settings.shuffleQuestions?'checked':''}>Перемешивать вопросы</label><label class="check mt"><input type="checkbox" name="shuffle-options" ${quiz.settings.shuffleOptions?'checked':''}>Перемешивать ответы</label><p>Настройки действуют при прохождении. Порядок в конструкторе сохраняется.</p></div><div class="setting">${btn('Создать отдельную копию','duplicate','full')}<p>Полезно для нового теста или сохранения правок при конфликте публикации.</p></div></aside></div></main>`,'admin');
+  const oldList = document.querySelector('#question-list');
+  const sameQuiz = oldList?.dataset.quizId === quiz.id;
+  const listScroll = sameQuiz ? oldList.scrollTop : 0;
+  const pageScroll = sameQuiz ? {x:window.scrollX,y:window.scrollY} : null;
+  const restoreFocus = sameQuiz && oldList.contains(document.activeElement);
+  setContent(`<main id="main"><div class="desktop-hint card empty"><h2>Откройте конструктор на компьютере</h2><p>Проходить тесты можно с телефона. Для создания вопросов нужен широкий экран.</p>${routeLink('К тестам','/catalog','primary')}</div><div class="editor-top between wrap"><div><div class="eyebrow">${quiz.baseRevision?'Редактирование теста':'Черновик'}</div><p class="editor-title">${h(quiz.title||'Новый тест')}</p><span id="save-status" class="saved">${state.unsaved?'Сохраняем…':'✓ Сохранено в этом браузере'}</span></div><div class="editor-actions">${routeLink('Мои тесты','/admin')}${btn('Предпросмотр','preview')}${btn(quiz.baseRevision?'Опубликовать правки':'Опубликовать','publish','primary','data-remote')}</div></div><div class="editor-layout"><aside class="card editor-list"><div class="between"><h3>Вопросы</h3><span class="pill" id="question-count">${count}</span></div><div id="question-list" class="question-list" data-quiz-id="${h(quiz.id)}">${questionList()}</div><div class="stack">${btn('＋ Новый вопрос','add-question','full')}${btn('Вставить полный вопрос','paste','subtle full')}${btn('Из другого теста','copy','full')}</div></aside><section class="card editor-main">${question?`<div class="between wrap"><div><div class="eyebrow">Один правильный ответ</div><h2 class="mt-sm">Вопрос ${quiz.questions.indexOf(question)+1}</h2></div><div class="row">${btn('↑','move-up','compact',`aria-label="Переместить вопрос вверх" ${quiz.questions.indexOf(question)===0?'disabled':''}`)}${btn('↓','move-down','compact',`aria-label="Переместить вопрос вниз" ${quiz.questions.indexOf(question)===count-1?'disabled':''}`)}${btn('Удалить вопрос','remove-question','compact danger')}</div></div><label class="field mt" for="question-text">Текст вопроса</label><textarea id="question-text" name="question-text" rows="3" placeholder="Введите вопрос">${h(question.text)}</textarea><div class="between mt"><h3>Варианты ответа</h3><span class="muted small">Минимум два</span></div><div id="option-rows">${optionRows(question)}</div><div class="row wrap mt">${btn('＋ Добавить вариант','add-option')}${btn('Заменить из текста','paste-replace','subtle')}</div><p class="muted small mt">Кружком слева отметьте правильный вариант. При добавлении нового вопроса выбран первый.</p>`:empty('Добавьте первый вопрос','Введите его вручную или вставьте вопрос и все ответы одним блоком.',btn('＋ Новый вопрос','add-question','primary'))}</section><aside class="card editor-settings"><h3>Настройки теста</h3><div class="setting"><label class="field" for="quiz-title">Название</label><input class="input" id="quiz-title" name="quiz-title" value="${h(quiz.title)}" placeholder="Название теста"><label class="field mt" for="quiz-description">Описание · необязательно</label><textarea id="quiz-description" name="quiz-description" rows="2" placeholder="Кратко о тесте">${h(quiz.description)}</textarea></div><div class="setting"><div class="setting-title">Вопросов в попытке</div><label class="check"><input type="radio" name="count-mode" value="all" ${quiz.settings.questionCount===null?'checked':''}>Все (${count})</label><label class="check mt-sm"><input type="radio" name="count-mode" value="part" ${quiz.settings.questionCount!==null?'checked':''} ${count<2?'disabled':''}>Случайная часть</label><div id="count-controls" class="${quiz.settings.questionCount===null?'hidden':''}"><input type="range" name="question-count-range" min="1" max="${Math.max(1,count-1)}" value="${quiz.settings.questionCount??Math.max(1,count-1)}" aria-label="Количество вопросов"><input class="input" type="number" name="question-count-number" min="1" max="${Math.max(1,count-1)}" value="${quiz.settings.questionCount??Math.max(1,count-1)}" aria-label="Точное количество вопросов"></div><label class="check mt"><input type="checkbox" name="allow-question-range" ${allowsQuestionRange(quiz)?'checked':''} ${quiz.settings.questionCount!==null?'disabled':''}>Разрешить выбор диапазона участнику</label><p>${quiz.settings.questionCount!==null?'Выбор диапазона недоступен при случайной части. Выберите «Все», чтобы включить его.':'Участник сможет выбрать номера вопросов перед началом. Настройка применяется после публикации.'}</p></div><div class="setting"><label class="check"><input type="checkbox" name="shuffle-questions" ${allowsQuestionRange(quiz)||quiz.settings.shuffleQuestions?'checked':''} ${allowsQuestionRange(quiz)?'disabled':''}>Перемешивать вопросы</label><label class="check mt"><input type="checkbox" name="shuffle-options" ${quiz.settings.shuffleOptions?'checked':''}>Перемешивать ответы</label><p>${allowsQuestionRange(quiz)?'Выбранный участником диапазон всегда перемешивается при прохождении.':'Настройки действуют при прохождении.'} Порядок в конструкторе сохраняется.</p></div><div class="setting">${btn('Создать отдельную копию','duplicate','full')}<p>Полезно для нового теста или сохранения правок при конфликте публикации.</p></div></aside></div></main>`,'admin');
+  document.querySelector('#question-list').scrollTop = listScroll;
+  if (restoreFocus) document.querySelector('.q-item.active')?.focus({preventScroll:true});
+  if (pageScroll) window.scrollTo(pageScroll.x,pageScroll.y);
   updateSaveStatus();
 }
 
@@ -78,30 +86,66 @@ function startPage(quiz, preview=false) {
   if (!quiz) return unavailable('Тест не найден','Возможно, создатель удалил его или ссылка неполная.');
   if (!preview && quiz.status==='closed') return unavailable('Тест закрыт','Создатель остановил доступ. Можно вернуться в каталог и выбрать другой тест.');
   const total = quiz.settings.questionCount ?? quiz.questions.length;
-  setContent(`<main id="main" class="page narrow">${preview?notice('Пробное прохождение. Результат не попадёт в историю.','warning'):''}<section class="card start-card"><div class="empty-icon" aria-hidden="true">▤</div><div class="eyebrow">${preview?'Предпросмотр':'Готовы начать?'}</div><h1>${h(quiz.title)}</h1>${quiz.description?`<p class="muted pre">${h(quiz.description)}</p>`:''}<div class="facts"><div class="fact"><b>${total} вопросов</b><small>${total<quiz.questions.length?`случайно из ${quiz.questions.length}`:'все вопросы теста'}</small></div><div class="fact"><b>Без лимита</b><small>время только измеряется</small></div><div class="fact"><b>Один ответ</b><small>на каждый вопрос</small></div></div><p class="muted small">После верного ответа переход произойдёт через 1,5 секунды. После ошибки вы увидите правильный вариант и перейдёте дальше сами. Обновление страницы начнёт попытку заново.</p>${btn('Начать прохождение',preview?'start-preview':'start-test','primary large',`data-id="${h(quiz.id)}"`)}${preview?`<div class="mt">${routeLink('Вернуться в конструктор',`/edit/${quiz.id}`)}</div>`:''}</section></main>`);
+  state.startSelection = allowsQuestionRange(quiz) && quiz.questions.length ? {id:quiz.id,total:quiz.questions.length,from:1,to:quiz.questions.length} : null;
+  setContent(`<main id="main" class="page narrow">${preview?notice('Пробное прохождение. Результат не попадёт в историю.','warning'):''}<section class="card start-card"><div class="empty-icon" aria-hidden="true">▤</div><div class="eyebrow">${preview?'Предпросмотр':'Готовы начать?'}</div><h1>${h(quiz.title)}</h1>${quiz.description?`<p class="muted pre">${h(quiz.description)}</p>`:''}<div class="facts"><div class="fact"><b id="start-question-count">${total} вопросов</b><small id="start-question-note">${total<quiz.questions.length?`случайно из ${quiz.questions.length}`:'все вопросы теста'}</small></div><div class="fact"><b>Без лимита</b><small>время только измеряется</small></div><div class="fact"><b>Один ответ</b><small>на каждый вопрос</small></div></div>${state.startSelection?questionRangeControls():''}<p class="muted small">После верного ответа переход произойдёт через 0,7 секунды. После ошибки вы увидите правильный вариант и перейдёте дальше сами. Обновление страницы начнёт попытку заново.</p>${btn('Начать прохождение',preview?'start-preview':'start-test','primary large',`id="start-attempt" data-id="${h(quiz.id)}"`)}${preview?`<div class="mt">${routeLink('Вернуться в конструктор',`/edit/${quiz.id}`)}</div>`:''}</section></main>`);
+  if (state.startSelection) syncQuestionRange();
 }
+
+function questionRangeControls() {
+  const r=state.startSelection;
+  return `<section class="question-range" aria-labelledby="range-title"><div class="between wrap"><h2 id="range-title">Какие вопросы пройти?</h2>${btn('Все вопросы','range-all','compact')}</div><p class="muted small">Номера соответствуют порядку вопросов в конструкторе. Выбранный диапазон перемешается при прохождении.</p><div class="range-slider"><div class="range-track"><div class="range-fill"></div></div><input type="range" data-range-bound="from" min="1" max="${r.total}" step="1" value="${r.from}" aria-label="Первый вопрос диапазона" ${r.total===1?'disabled':''}><input type="range" data-range-bound="to" min="1" max="${r.total}" step="1" value="${r.to}" aria-label="Последний вопрос диапазона" ${r.total===1?'disabled':''}></div><div class="range-fields"><label class="field">От<input class="input" type="number" data-range-bound="from" min="1" max="${r.total}" step="1" value="${r.from}" required></label><span class="muted">—</span><label class="field">До включительно<input class="input" type="number" data-range-bound="to" min="1" max="${r.total}" step="1" value="${r.to}" required></label></div><div id="range-error" class="bad-text small" role="status"></div></section>`;
+}
+function syncQuestionRange(activeInput=null) {
+  const r=state.startSelection;
+  for (const input of document.querySelectorAll('[data-range-bound]')) {
+    const bound=input.dataset.rangeBound;
+    if (input!==activeInput) input.value=r[bound];
+    if (input.type==='number') {input.min=bound==='to'?r.from:1;input.max=bound==='from'?r.to:r.total;}
+    else input.setAttribute('aria-valuetext',`Вопрос №${r[bound]}`);
+  }
+  const slider=document.querySelector('.range-slider');
+  slider.style.setProperty('--range-start',`${(r.from-1)/Math.max(1,r.total-1)*100}%`);
+  slider.style.setProperty('--range-end',`${(r.to-1)/Math.max(1,r.total-1)*100}%`);
+  document.querySelector('#start-question-count').textContent=`${r.to-r.from+1} вопросов`;
+  document.querySelector('#start-question-note').textContent=`№${r.from}–${r.to} из ${r.total}`;
+  document.querySelector('#range-error').textContent='';
+  document.querySelector('#start-attempt').disabled=false;
+}
+function updateQuestionRange(input,commit=false) {
+  const r=state.startSelection;if(!r)return;
+  const bound=input.dataset.rangeBound,min=bound==='to'?r.from:1,max=bound==='from'?r.to:r.total;
+  let value=input.valueAsNumber;
+  if(commit||input.type==='range') {
+    value=Number.isFinite(value)?Math.max(min,Math.min(max,Math.trunc(value))):r[bound];
+  } else if(!Number.isInteger(value)||value<min||value>max) {
+    document.querySelector('#range-error').textContent=`Введите целое число от ${min} до ${max}.`;
+    document.querySelector('#start-attempt').disabled=true;return;
+  }
+  r[bound]=value;syncQuestionRange(commit||input.type==='range'?null:input);
+}
+function rangeLabel(result) {return result.questionRange?`Вопросы №${result.questionRange.from}–${result.questionRange.to} из ${result.questionRange.poolSize}`:'';}
 function unavailable(title,text) {setContent(`<main id="main" class="page narrow">${empty(h(title),h(text),routeLink('Все тесты','/catalog','primary'))}</main>`);}
 
 function playPage() {
   const a=state.attempt;
   if (!a) return;
   const q=a.questions[a.index], selected=a.answers[a.index], answered=selected!==undefined, correct=selected===q.correctOptionId;
-  setContent(`<main id="main" class="quiz-page">${a.preview?notice('Предпросмотр · попытка не сохраняется','warning'):''}${a.blocked?notice(`${h(a.blocked)} ${btn('Проверить соединение','retry-status','compact')}`,'error'):''}<div class="quiz-top mt-sm"><div><div class="eyebrow">${h(a.quiz.title)}</div><h1>Вопрос ${a.index+1} из ${a.questions.length}</h1></div><span class="pill">◷ <span id="elapsed">${formatDuration(Date.now()-a.startedAt)}</span></span></div><progress class="progress" max="${a.questions.length}" value="${a.index}" aria-label="Прогресс"></progress><section class="card quiz-card"><h2>${h(q.text)}</h2>${q.options.map((o,i)=>`<button class="answer ${answered&&o.id===q.correctOptionId?'good':''} ${answered&&o.id===selected&&!correct?'bad':''}" data-action="answer" data-id="${h(o.id)}" ${answered||a.checking||a.blocked?'disabled':''}><span class="letter">${i<26?String.fromCharCode(65+i):i+1}</span><span class="answer-text">${h(o.text)}</span>${answered&&o.id===q.correctOptionId?'<span class="answer-tag">✓ Правильный ответ</span>':''}${answered&&o.id===selected&&!correct?'<span class="answer-tag">✕ Ваш ответ</span>':''}</button>`).join('')}<div class="feedback" aria-live="polite">${answered?(correct?'<span class="good-text">✓ Верно! Переходим дальше…</span>':`<span class="bad-text">Неверно. Правильный ответ выделен зелёным.</span>${btn(a.index===a.questions.length-1?'Посмотреть результат':'Следующий вопрос →','next-question','primary large')}`):`<span class="muted small">${a.checking?'Проверяем доступность теста…':'Выберите один вариант ответа'}</span>`}</div></section></main>`,'catalog',true);
+  setContent(`<main id="main" class="quiz-page">${a.preview?notice('Предпросмотр · попытка не сохраняется','warning'):''}${a.blocked?notice(`${h(a.blocked)} ${btn('Проверить соединение','retry-status','compact')}`,'error'):''}<div class="quiz-top mt-sm"><div><div class="eyebrow">${h(a.quiz.title)}</div><h1>Вопрос ${a.index+1} из ${a.questions.length}</h1>${a.questionRange?`<span class="muted small">№${q.originalIndex} в общем списке · диапазон ${a.questionRange.from}–${a.questionRange.to}</span>`:''}</div><span class="pill">◷ <span id="elapsed">${formatDuration(Date.now()-a.startedAt)}</span></span></div><progress class="progress" max="${a.questions.length}" value="${a.index}" aria-label="Прогресс"></progress><section class="card quiz-card"><h2>${h(q.text)}</h2>${q.options.map((o,i)=>`<button class="answer ${answered&&o.id===q.correctOptionId?'good':''} ${answered&&o.id===selected&&!correct?'bad':''}" data-action="answer" data-id="${h(o.id)}" ${answered||a.checking||a.blocked?'disabled':''}><span class="letter">${i<26?String.fromCharCode(65+i):i+1}</span><span class="answer-text">${h(o.text)}</span>${answered&&o.id===q.correctOptionId?'<span class="answer-tag">✓ Правильный ответ</span>':''}${answered&&o.id===selected&&!correct?'<span class="answer-tag">✕ Ваш ответ</span>':''}</button>`).join('')}<div class="feedback" aria-live="polite">${answered?(correct?'<span class="good-text">✓ Верно! Переходим дальше…</span>':`<span class="bad-text">Неверно. Правильный ответ выделен зелёным.</span>${btn(a.index===a.questions.length-1?'Посмотреть результат':'Следующий вопрос →','next-question','primary large')}`):`<span class="muted small">${a.checking?'Проверяем доступность теста…':'Выберите один вариант ответа'}</span>`}</div></section></main>`,'catalog',true);
 }
 
 function reviewCards(result) {
   const items=result.questions.map((q,i)=>({...q,number:i+1})).filter(q=>state.review==='all'||!q.correct);
   if (!items.length) return empty('Все ответы правильные','Вы прошли тест без ошибок.');
-  return items.map(q=>`<article class="card review-card"><div class="between"><span class="eyebrow">Вопрос ${q.number}</span><span class="pill ${q.correct?'good':'bad'}">${q.correct?'Верно':'Ошибка'}</span></div><h3>${h(q.text)}</h3><div class="review-options">${q.options.map(o=>`<div class="review-option ${o.id===q.correctOptionId?'good':''} ${o.id===q.selectedOptionId&&!q.correct?'bad':''}"><span class="pre grow">${h(o.text)}</span>${o.id===q.selectedOptionId?`<span class="pill ${q.correct?'good':'bad'}">Ваш ответ</span>`:''}${o.id===q.correctOptionId?'<span class="pill good">Правильный</span>':''}</div>`).join('')}</div></article>`).join('');
+  return items.map(q=>`<article class="card review-card"><div class="between"><span class="eyebrow">Вопрос ${q.number}${result.questionRange?` · №${q.originalIndex} в общем списке`:''}</span><span class="pill ${q.correct?'good':'bad'}">${q.correct?'Верно':'Ошибка'}</span></div><h3>${h(q.text)}</h3><div class="review-options">${q.options.map(o=>`<div class="review-option ${o.id===q.correctOptionId?'good':''} ${o.id===q.selectedOptionId&&!q.correct?'bad':''}"><span class="pre grow">${h(o.text)}</span>${o.id===q.selectedOptionId?`<span class="pill ${q.correct?'good':'bad'}">Ваш ответ</span>`:''}${o.id===q.correctOptionId?'<span class="pill good">Правильный</span>':''}</div>`).join('')}</div></article>`).join('');
 }
 function resultPage(result, preview=false) {
   if (!result) return unavailable('Результат не найден','Он мог быть удалён вместе с данными браузера или сохранён на другом устройстве.');
   state.result=result;
-  setContent(`<main id="main" class="page"><div class="eyebrow">${preview?'Пробная попытка':'Попытка завершена'}</div><h1>Результат теста</h1>${result.saveError?notice(h(result.saveError)+' Результат виден в этой вкладке, но не сохранён в историю.','error'):''}<div class="result-layout mt"><section><div class="card result-hero"><div class="between wrap"><div><h2>${h(result.title)}</h2><span class="muted small">${h(date(result.finishedAt))}</span></div><div class="score">${result.percent}%</div></div><div class="facts"><div class="fact"><b>${result.correct} из ${result.total}</b><small>правильных ответов</small></div><div class="fact"><b>${result.wrong}</b><small>неправильных ответов</small></div><div class="fact"><b>${formatDuration(result.durationMs)}</b><small>время прохождения</small></div></div></div><div class="between wrap mt"><h2>Разбор ответов</h2><div class="tabs"><button class="${state.review==='all'?'active':''}" data-action="review-filter" data-filter="all">Все · ${result.total}</button><button class="${state.review==='wrong'?'active':''}" data-action="review-filter" data-filter="wrong">Ошибки · ${result.wrong}</button></div></div><div id="review-list">${reviewCards(result)}</div></section><aside class="card result-aside"><h3>Продолжить обучение</h3><p class="muted small">Разберите ошибки или попробуйте пройти тест ещё раз.</p>${preview?routeLink('В конструктор',`/edit/${result.quizId}`,'primary full'):routeLink('Пройти снова',`/test/${result.quizId}`,'primary full')}${preview?'':routeLink('История попыток','/history','full mt-sm')}</aside></div></main>`,'history');
+  setContent(`<main id="main" class="page"><div class="eyebrow">${preview?'Пробная попытка':'Попытка завершена'}</div><h1>Результат теста</h1>${result.saveError?notice(h(result.saveError)+' Результат виден в этой вкладке, но не сохранён в историю.','error'):''}<div class="result-layout mt"><section><div class="card result-hero"><div class="between wrap"><div><h2>${h(result.title)}</h2>${result.questionRange?`<p class="muted small">${rangeLabel(result)}</p>`:''}<span class="muted small">${h(date(result.finishedAt))}</span></div><div class="score">${result.percent}%</div></div><div class="facts"><div class="fact"><b>${result.correct} из ${result.total}</b><small>правильных ответов</small></div><div class="fact"><b>${result.wrong}</b><small>неправильных ответов</small></div><div class="fact"><b>${formatDuration(result.durationMs)}</b><small>время прохождения</small></div></div></div><div class="between wrap mt"><h2>Разбор ответов</h2><div class="tabs"><button class="${state.review==='all'?'active':''}" data-action="review-filter" data-filter="all">Все · ${result.total}</button><button class="${state.review==='wrong'?'active':''}" data-action="review-filter" data-filter="wrong">Ошибки · ${result.wrong}</button></div></div><div id="review-list">${reviewCards(result)}</div></section><aside class="card result-aside"><h3>Продолжить обучение</h3><p class="muted small">Разберите ошибки или попробуйте пройти тест ещё раз.</p>${preview?routeLink('В конструктор',`/edit/${result.quizId}`,'primary full'):routeLink('Пройти снова',`/test/${result.quizId}`,'primary full')}${preview?'':routeLink('История попыток','/history','full mt-sm')}</aside></div></main>`,'history');
 }
 function historyPage() {
   const attempts=[...state.attempts].sort((a,b)=>b.finishedAt-a.finishedAt);
-  setContent(`<main id="main" class="page"><div class="eyebrow">На этом устройстве</div><h1>История попыток</h1><p class="muted">Здесь сохраняются ваши завершённые тесты и подробный разбор ответов.</p>${storageNotice()}${attempts.length?`<div class="card table-wrap mt"><table class="history-table"><thead><tr><th>Тест</th><th>Дата</th><th>Результат</th><th>Время</th><th><span class="sr-only">Действие</span></th></tr></thead><tbody>${attempts.map(r=>`<tr><td><b>${h(r.title)}</b></td><td>${h(date(r.finishedAt))}</td><td><span class="pill ${r.percent>=70?'good':'warn'}">${r.correct} из ${r.total} · ${r.percent}%</span></td><td>${formatDuration(r.durationMs)}</td><td>${routeLink('Посмотреть',`/result/${r.id}`)}</td></tr>`).join('')}</tbody></table></div>`:empty('История пока пуста','Пройдите любой доступный тест — результат появится здесь.',routeLink('Выбрать тест','/catalog','primary'))}<div class="notice mt">Закрытие браузера и перезагрузка компьютера не удаляют историю. Она хранится в этом браузере и профиле, без синхронизации с другими устройствами. Очистка данных сайта удалит её; в приватном режиме она исчезнет после закрытия окна.</div></main>`,'history');
+  setContent(`<main id="main" class="page"><div class="eyebrow">На этом устройстве</div><h1>История попыток</h1><p class="muted">Здесь сохраняются ваши завершённые тесты и подробный разбор ответов.</p>${storageNotice()}${attempts.length?`<div class="card table-wrap mt"><table class="history-table"><thead><tr><th>Тест</th><th>Дата</th><th>Результат</th><th>Время</th><th><span class="sr-only">Действие</span></th></tr></thead><tbody>${attempts.map(r=>`<tr><td><b>${h(r.title)}</b>${r.questionRange?`<div class="muted small mt-sm">${rangeLabel(r)}</div>`:''}</td><td>${h(date(r.finishedAt))}</td><td><span class="pill ${r.percent>=70?'good':'warn'}">${r.correct} из ${r.total} · ${r.percent}%</span></td><td>${formatDuration(r.durationMs)}</td><td>${routeLink('Посмотреть',`/result/${r.id}`)}</td></tr>`).join('')}</tbody></table></div>`:empty('История пока пуста','Пройдите любой доступный тест — результат появится здесь.',routeLink('Выбрать тест','/catalog','primary'))}<div class="notice mt">Закрытие браузера и перезагрузка компьютера не удаляют историю. Она хранится в этом браузере и профиле, без синхронизации с другими устройствами. Очистка данных сайта удалит её; в приватном режиме она исчезнет после закрытия окна.</div></main>`,'history');
 }
 
 function showDialog(title, body, actions='') {
@@ -237,10 +281,11 @@ async function deleteQuiz(id) {
   });
 }
 
-async function beginAttempt(quiz,preview=false) {
+async function beginAttempt(quiz,preview=false,range=null) {
   const errors=quizErrors(quiz);if(errors.length){showErrors(errors);return;}
   stopAttempt();
-  state.attempt={quiz:clone(quiz),questions:prepareQuestions(quiz),answers:[],index:0,startedAt:Date.now(),lastCheck:Date.now(),preview,blocked:'',checking:false,done:false,timer:null,advance:null,poll:null};
+  const questionRange=allowsQuestionRange(quiz)?normalizeQuestionRange(quiz.questions.length,range??{}):null;
+  state.attempt={quiz:clone(quiz),questionRange,questions:prepareQuestions(quiz,Math.random,questionRange),answers:[],index:0,startedAt:Date.now(),lastCheck:Date.now(),preview,blocked:'',checking:false,done:false,timer:null,advance:null,poll:null};
   const a=state.attempt;
   a.timer=setInterval(()=>{const elapsed=document.querySelector('#elapsed');if(elapsed)elapsed.textContent=formatDuration(Date.now()-a.startedAt);},1000);
   if(!preview)a.poll=setInterval(()=>checkAccess(a).catch(error=>{if(state.attempt===a){a.blocked=errorMessage(error);playPage();}}),CONFIG.statusInterval);
@@ -276,7 +321,7 @@ async function nextQuestion() {
     if(!(await checkAccess(a,a.index===a.questions.length-1)))return;
     if(a.index+1<a.questions.length){a.index++;a.checking=false;playPage();window.scrollTo(0,0);return;}
     a.done=true;
-    const result=makeResult(a.quiz,a.questions,a.answers,a.startedAt);
+    const result=makeResult(a.quiz,a.questions,a.answers,a.startedAt,Date.now(),a.questionRange);
     if(!a.preview){try{await db.put('attempts',result);state.attempts.push(result);}catch(error){result.saveError=errorMessage(error);}}
     const preview=a.preview;stopAttempt();state.result=result;state.review='all';
     history.replaceState(null,'',link(preview?`/preview-result/${result.id}`:`/result/${result.id}`));state.route=preview?`/preview-result/${result.id}`:`/result/${result.id}`;
@@ -297,7 +342,9 @@ async function route() {
   }
   closeDialog();
   state.route=path;state.search='';
-  const [section,id]=path.slice(1).split('/').map(decodeURIComponent);
+  const [routePath,query='']=path.split('?');
+  const params=new URLSearchParams(query);
+  const [section,id]=routePath.slice(1).split('/').map(decodeURIComponent);
   if(section==='catalog'){catalogPage();}
   else if(section==='admin'){state.drafts=await db.all('drafts').catch(error=>{state.storageError=errorMessage(error);return state.drafts;});if(version===routeVersion)adminPage();}
   else if(section==='edit'){
@@ -322,7 +369,7 @@ async function route() {
       else{state.catalog=await loadPublicCatalog();quiz=findQuiz(id);}
       if(version!==routeVersion)return;
       if(!quiz||quiz.status==='closed'&&section!=='run-preview'){startPage(quiz);return;}
-      await beginAttempt(quiz,section==='run-preview');
+      await beginAttempt(quiz,section==='run-preview',{from:params.get('from'),to:params.get('to')});
     }
     if(version===routeVersion)playPage();
   }
@@ -395,7 +442,11 @@ async function handleAction(action,element) {
   if(action==='duplicate'){
     await flushDraft();const q=newQuiz();q.title=(state.editor.title||'Без названия')+' — копия';q.description=state.editor.description;q.settings=clone(state.editor.settings);q.questions=state.editor.questions.map(copyQuestion);await storeDraft(q);location.hash=link(`/edit/${q.id}`);return;
   }
-  if(action==='start-test'||action==='start-preview'){location.hash=link(`/${action==='start-preview'?'run-preview':'run'}/${id}`);return;}
+  if(action==='range-all'){state.startSelection.from=1;state.startSelection.to=state.startSelection.total;syncQuestionRange();return;}
+  if(action==='start-test'||action==='start-preview'){
+    const r=state.startSelection?.id===id?state.startSelection:null;
+    location.hash=link(`/${action==='start-preview'?'run-preview':'run'}/${id}${r?`?from=${r.from}&to=${r.to}`:''}`);return;
+  }
   if(action==='answer'){await chooseAnswer(id);return;}
   if(action==='next-question'){await nextQuestion();return;}
   if(action==='retry-status'){
@@ -412,6 +463,7 @@ document.addEventListener('click',event=>{
 });
 document.addEventListener('input',event=>{
   const el=event.target;
+  if(el.dataset.rangeBound){updateQuestionRange(el);return;}
   if(el.name==='catalog-search'){state.search=el.value;document.querySelector('#catalog-list').innerHTML=catalogCards();return;}
   if(el.id==='paste-text'||el.id==='strip-prefixes'){updatePaste();return;}
   if(!state.editor)return;
@@ -421,10 +473,11 @@ document.addEventListener('input',event=>{
   else if(el.name==='question-text'){q.text=el.value;document.querySelector('#question-list').innerHTML=questionList();}
   else if(el.dataset.option){const option=q.options.find(o=>o.id===el.dataset.option);if(option)option.text=el.value;}
   else if(el.name==='correct-option'){q.correctOptionId=el.value;document.querySelectorAll('.option-row').forEach(row=>row.classList.toggle('correct',row.querySelector('input[type=radio]').checked));}
+  else if(el.name==='allow-question-range'){state.editor.settings.allowQuestionRange=el.checked&&state.editor.settings.questionCount===null;markDirty();editorPage();return;}
   else if(el.name==='shuffle-questions')state.editor.settings.shuffleQuestions=el.checked;
   else if(el.name==='shuffle-options')state.editor.settings.shuffleOptions=el.checked;
   else if(el.name==='count-mode'){
-    state.editor.settings.questionCount=el.value==='all'?null:Math.max(1,state.editor.questions.length-1);markDirty();editorPage();return;
+    state.editor.settings.questionCount=el.value==='all'?null:Math.max(1,state.editor.questions.length-1);state.editor.settings.allowQuestionRange=el.value==='all';markDirty();editorPage();return;
   }
   else if(el.name==='question-count-range'||el.name==='question-count-number'){
     const count=Math.max(1,Math.min(Math.max(1,state.editor.questions.length-1),Number(el.value)||1));state.editor.settings.questionCount=count;
@@ -435,6 +488,7 @@ document.addEventListener('input',event=>{
 });
 document.addEventListener('change',event=>{
   const el=event.target;
+  if(el.dataset.rangeBound){updateQuestionRange(el,true);return;}
   if(el.name==='question-count-number')el.value=state.editor.settings.questionCount;
   if(el.id==='copy-source'){copyState.source=copyState.sources.find(q=>q.id===el.value);copyState.selected.clear();renderCopyList();}
   if(el.dataset.copy){if(el.checked)copyState.selected.add(el.dataset.copy);else copyState.selected.delete(el.dataset.copy);updateCopyCount();}
