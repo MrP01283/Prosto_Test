@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Макеты сайта тестов — 10 экранов</title>
+  <style>
+    :root { font-family: Inter, "Segoe UI", Arial, sans-serif; color-scheme: light; }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    button, input, textarea { font: inherit; }
+    button { cursor: pointer; }
+    .demo { min-height: 100vh; background: #e9edf4; }
+    .demo-toolbar { position: sticky; top: 0; z-index: 50; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 20px; color: #172339; background: #fff; border-bottom: 1px solid #d9e0eb; box-shadow: 0 3px 16px #1c35551a; }
+    .demo-brand { font-weight: 800; white-space: nowrap; }
+    .demo-brand small { display: block; color: #68768a; font-weight: 500; font-size: 11px; }
+    .demo-select { min-width: 250px; max-width: 400px; flex: 1; padding: 9px 12px; border: 1px solid #cbd5e2; border-radius: 9px; color: #172339; background: #fff; }
+    .demo-count { color: #66758a; font-size: 13px; white-space: nowrap; }
+    .demo-button { border: 1px solid #cbd5e2; border-radius: 9px; padding: 9px 13px; color: #263956; background: #f8fafc; font-weight: 650; }
+    .demo-button:hover { background: #edf3fa; }
+    .demo-note { color: #68768a; font-size: 12px; margin-left: auto; }
+    .stage { padding: 22px; }
+    .site { --bg: #f7f9fc; --surface: #fff; --surface-2: #f3f6fb; --ink: #16223b; --muted: #67758d; --border: #dce4ef; --accent: #2769e5; --accent-hover: #1958ca; --accent-soft: #e8f0ff; --good: #17845a; --good-soft: #e4f7ee; --bad: #d44655; --bad-soft: #fff0f0; --warning: #b06a0d; --warning-soft: #fff3dd; --shadow: 0 12px 36px #243a5c0e; color: var(--ink); background: var(--bg); min-height: calc(100vh - 119px); border: 1px solid #d4dce8; border-radius: 15px; overflow: hidden; }
+    .site.dark { --bg: #0e1522; --surface: #182231; --surface-2: #202c3e; --ink: #f1f5fb; --muted: #a5b1c4; --border: #324155; --accent: #8267ff; --accent-hover: #6d55e2; --accent-soft: #2c2853; --good: #58d8ad; --good-soft: #163d37; --bad: #ff7883; --bad-soft: #4c2a38; --warning: #f3ba63; --warning-soft: #483925; --shadow: 0 16px 40px #05091045; color-scheme: dark; }
+    .site-head { height: 72px; display: flex; align-items: center; gap: 28px; padding: 0 clamp(24px, 4vw, 66px); background: var(--surface); border-bottom: 1px solid var(--border); }
+    .logo { display: flex; align-items: center; gap: 10px; font-size: 23px; font-weight: 800; letter-spacing: -.04em; white-space: nowrap; }
+    .logo-mark { display: grid; place-items: center; width: 35px; height: 35px; border-radius: 10px; background: var(--accent); color: white; font-size: 23px; }
+    .site-nav { display: flex; align-items: center; gap: 24px; margin-left: 25px; }
+    .site-nav button { color: var(--muted); background: none; border: 0; padding: 25px 0 23px; border-bottom: 3px solid transparent; font-size: 14px; font-weight: 650; }
+    .site-nav button.active { color: var(--accent); border-color: var(--accent); }
+    .site-nav button:hover { color: var(--accent); }
+    .head-spacer { flex: 1; }
+    .icon-button { display: inline-grid; place-items: center; flex: none; width: 38px; height: 38px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); color: var(--ink); font-size: 19px; }
+    .avatar { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-weight: 750; }
+    .page { max-width: 1240px; margin: auto; padding: clamp(25px, 4vw, 54px); }
+    .page.wide { max-width: 1450px; }
+    .page.quiz-page { max-width: 980px; padding-top: 38px; padding-bottom: 72px; }
+    .eyebrow { color: var(--accent); font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .11em; }
+    h1 { font-size: clamp(29px, 3.2vw, 42px); margin: 7px 0 9px; line-height: 1.16; letter-spacing: -.04em; }
+    h2 { font-size: 23px; margin: 0; letter-spacing: -.025em; }
+    h3 { font-size: 17px; margin: 0; }
+    p { line-height: 1.55; }
+    .muted { color: var(--muted); }
+    .small { font-size: 13px; }
+    .row { display: flex; align-items: center; gap: 12px; }
+    .between { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+    .wrap { flex-wrap: wrap; }
+    .mt-16 { margin-top: 16px; } .mt-22 { margin-top: 22px; } .mt-30 { margin-top: 30px; } .mb-24 { margin-bottom: 24px; }
+    .button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 43px; padding: 10px 17px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); color: var(--ink); font-size: 14px; font-weight: 730; white-space: nowrap; }
+    .button:hover { background: var(--surface-2); }
+    .button.primary { color: #fff; border-color: var(--accent); background: var(--accent); }
+    .button.primary:hover { background: var(--accent-hover); }
+    .button.subtle { color: var(--accent); border-color: transparent; background: var(--accent-soft); }
+    .button.danger { color: var(--bad); border-color: var(--bad); }
+    .button.large { min-height: 52px; padding: 13px 24px; font-size: 16px; }
+    .button.full { width: 100%; }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; box-shadow: var(--shadow); }
+    .pill { display: inline-flex; align-items: center; gap: 5px; padding: 6px 10px; border-radius: 99px; color: var(--muted); background: var(--surface-2); font-size: 12px; font-weight: 720; }
+    .pill.good { color: var(--good); background: var(--good-soft); } .pill.warn { color: var(--warning); background: var(--warning-soft); } .pill.bad { color: var(--bad); background: var(--bad-soft); }
+    .search { display: flex; align-items: center; gap: 10px; width: 300px; min-height: 44px; padding: 0 14px; color: var(--muted); background: var(--surface); border: 1px solid var(--border); border-radius: 11px; }
+    .search input { min-width: 0; width: 100%; border: 0; outline: 0; background: transparent; color: var(--ink); }
+    .search input::placeholder, textarea::placeholder, input::placeholder { color: var(--muted); }
+    .test-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; margin-top: 27px; }
+    .test-card { display: flex; flex-direction: column; min-height: 228px; padding: 24px; }
+    .test-card .symbol { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 12px; color: var(--accent); background: var(--accent-soft); font-size: 21px; }
+    .test-card h3 { margin-top: 18px; font-size: 19px; }
+    .test-card p { margin: 7px 0 18px; font-size: 14px; }
+    .test-card .button { margin-top: auto; }
+    .filter-tabs { display: flex; gap: 9px; flex-wrap: wrap; }
+    .filter-tabs span { padding: 9px 14px; border: 1px solid var(--border); border-radius: 99px; color: var(--muted); font-size: 13px; font-weight: 700; background: var(--surface); }
+    .filter-tabs span.active { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+    .admin-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 23px; }
+    .admin-card { padding: 23px; min-height: 277px; display: flex; flex-direction: column; }
+    .admin-card h3 { margin: 20px 0 4px; font-size: 20px; }
+    .admin-card .actions { display: flex; gap: 8px; margin-top: auto; }
+    .admin-card .actions .button { flex: 1; padding-left: 8px; padding-right: 8px; }
+    .notice { padding: 15px 18px; color: var(--muted); background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; font-size: 13px; }
+    .editor { display: grid; grid-template-columns: 236px minmax(0, 1fr) 225px; gap: 20px; max-width: 1500px; margin: auto; padding: 22px; }
+    .editor-side, .editor-main, .editor-settings { min-height: 670px; }
+    .editor-side { padding: 17px; }
+    .editor-main { padding: 26px 30px; }
+    .editor-settings { padding: 19px; }
+    .question-list { display: grid; gap: 8px; margin-top: 17px; }
+    .question-item { padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); font-size: 13px; line-height: 1.4; }
+    .question-item.selected { border-color: var(--accent); background: var(--accent-soft); }
+    .question-item b { display: block; margin-bottom: 3px; }
+    .field-label { display: block; margin: 22px 0 8px; font-size: 13px; font-weight: 760; }
+    .field, .textarea { display: block; width: 100%; border: 1px solid var(--border); background: var(--surface); color: var(--ink); border-radius: 10px; outline: none; }
+    .field { min-height: 43px; padding: 9px 12px; }
+    .textarea { min-height: 86px; padding: 12px 13px; resize: vertical; line-height: 1.5; }
+    .field:focus, .textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+    .option-row { display: flex; align-items: center; gap: 9px; margin: 9px 0; }
+    .letter { display: grid; place-items: center; width: 32px; height: 32px; flex: none; border-radius: 9px; color: var(--muted); background: var(--surface-2); font-weight: 800; font-size: 13px; }
+    .option-row.correct .letter { background: var(--good-soft); color: var(--good); }
+    .radio { width: 18px; height: 18px; flex: none; accent-color: var(--good); }
+    .option-row .field { flex: 1; }
+    .option-row .icon-button { width: 34px; height: 34px; border: 0; font-size: 17px; color: var(--muted); }
+    .setting { padding: 17px 0; border-bottom: 1px solid var(--border); }
+    .setting:first-of-type { margin-top: 12px; }
+    .setting b { font-size: 13px; }
+    .setting p { margin: 6px 0 10px; font-size: 12px; color: var(--muted); }
+    .switch { width: 37px; height: 21px; border-radius: 99px; background: var(--accent); padding: 3px; margin-left: auto; }
+    .switch::after { content: ""; display: block; width: 15px; height: 15px; background: white; border-radius: 50%; margin-left: auto; }
+    .range { width: 100%; accent-color: var(--accent); }
+    .overlay { position: absolute; inset: 72px 0 0; display: grid; place-items: center; background: #10182799; padding: 22px; }
+    .modal { width: min(850px, 100%); max-height: calc(100vh - 175px); overflow: auto; padding: 25px; background: var(--surface); border: 1px solid var(--border); border-radius: 17px; box-shadow: 0 26px 80px #050a1b55; }
+    .modal.small-modal { width: min(720px, 100%); }
+    .modal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-top: 18px; }
+    .sample { min-height: 290px; white-space: pre-wrap; }
+    .parsed { min-height: 290px; padding: 17px; border-radius: 11px; background: var(--surface-2); border: 1px solid var(--border); font-size: 13px; line-height: 1.7; }
+    .parsed b { color: var(--accent); }
+    .checkline { display: flex; align-items: center; gap: 9px; font-size: 13px; margin-top: 15px; }
+    .checkline input { accent-color: var(--accent); }
+    .transfer-list { display: grid; gap: 8px; margin: 18px 0; }
+    .transfer-item { display: flex; align-items: flex-start; gap: 11px; padding: 12px; border: 1px solid var(--border); border-radius: 10px; font-size: 13px; }
+    .transfer-item input { accent-color: var(--accent); margin-top: 3px; }
+    .quiz-head { display: flex; align-items: center; justify-content: space-between; gap: 15px; margin-bottom: 18px; }
+    .progress { height: 8px; border-radius: 99px; background: var(--surface-2); overflow: hidden; }
+    .progress span { display: block; height: 100%; width: 24%; background: var(--accent); border-radius: 99px; }
+    .quiz-card { padding: clamp(25px, 4vw, 46px); margin-top: 28px; }
+    .quiz-card h2 { font-size: clamp(23px, 2.4vw, 31px); line-height: 1.35; margin: 0 0 27px; }
+    .answer { display: flex; align-items: center; gap: 14px; width: 100%; min-height: 58px; margin-top: 10px; padding: 12px 15px; border: 1px solid var(--border); border-radius: 11px; color: var(--ink); background: var(--surface); text-align: left; line-height: 1.35; }
+    .answer:hover { border-color: var(--accent); background: var(--accent-soft); }
+    .answer .answer-letter { display: grid; place-items: center; width: 29px; height: 29px; flex: none; border-radius: 8px; background: var(--surface-2); color: var(--muted); font-size: 13px; font-weight: 800; }
+    .answer.good { border-color: var(--good); background: var(--good-soft); }
+    .answer.good .answer-letter { color: var(--good); background: var(--surface); }
+    .answer.bad { border-color: var(--bad); background: var(--bad-soft); }
+    .answer.bad .answer-letter { color: var(--bad); background: var(--surface); }
+    .answer-tag { margin-left: auto; white-space: nowrap; font-size: 12px; font-weight: 800; }
+    .answer.good .answer-tag { color: var(--good); } .answer.bad .answer-tag { color: var(--bad); }
+    .quiz-foot { margin-top: 28px; display: flex; justify-content: flex-end; gap: 10px; }
+    .start-card { max-width: 720px; margin: 25px auto 0; padding: 38px; text-align: center; }
+    .start-icon { width: 62px; height: 62px; display: grid; place-items: center; margin: auto auto 17px; border-radius: 18px; color: var(--accent); background: var(--accent-soft); font-size: 27px; }
+    .facts { display: flex; justify-content: center; gap: 13px; margin: 24px 0; flex-wrap: wrap; }
+    .fact { min-width: 145px; padding: 13px; border: 1px solid var(--border); border-radius: 11px; background: var(--surface-2); text-align: left; }
+    .fact b { display: block; margin-bottom: 3px; }
+    .result-hero { padding: 30px; }
+    .result-layout { display: grid; grid-template-columns: minmax(0, 1fr) 240px; gap: 20px; align-items: start; }
+    .score { font-size: 54px; letter-spacing: -.06em; font-weight: 850; line-height: 1; color: var(--good); }
+    .review-card { padding: 20px 22px; margin-top: 12px; }
+    .review-card h3 { margin-bottom: 13px; }
+    .review-line { display: flex; gap: 7px; margin-top: 8px; font-size: 13px; }
+    .review-line b { min-width: 135px; }
+    .history-table { width: 100%; border-collapse: collapse; }
+    .history-table th, .history-table td { padding: 17px 20px; border-bottom: 1px solid var(--border); text-align: left; font-size: 14px; }
+    .history-table th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+    .history-table tr:last-child td { border-bottom: 0; }
+    .screen-wrap { position: relative; }
+    .toast { position: fixed; bottom: 25px; left: 50%; transform: translateX(-50%); background: var(--good); color: #fff; padding: 12px 19px; border-radius: 10px; box-shadow: var(--shadow); z-index: 90; font-weight: 750; }
+    @media (max-width: 1050px) { .test-grid, .admin-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } .editor { grid-template-columns: 180px minmax(0, 1fr); } .editor-settings { grid-column: 1 / -1; min-height: auto; } .site-nav { margin-left: 0; } }
+    @media (max-width: 740px) { .stage { padding: 0; } .site { border-radius: 0; border: 0; } .demo-toolbar { gap: 7px; padding: 8px; } .demo-note { display: none; } .demo-select { min-width: 0; } .site-head { padding: 0 17px; gap: 11px; } .site-nav { gap: 10px; } .site-nav button { font-size: 12px; } .logo { font-size: 18px; } .logo-mark { width: 30px; height: 30px; } .avatar { display: none; } .page { padding: 24px 16px; } .test-grid, .admin-cards { grid-template-columns: 1fr; } .search { width: 100%; } .editor { display: block; padding: 14px; } .editor-side, .editor-settings { display: none; } .editor-main { padding: 20px; min-height: auto; } .modal-grid, .result-layout { grid-template-columns: 1fr; } .modal { max-height: calc(100vh - 135px); } .overlay { top: 72px; } .history-table th:nth-child(3), .history-table td:nth-child(3) { display: none; } }
+  </style>
+</head>
+<body>
+  <div class="demo">
+    <div class="demo-toolbar">
+      <div class="demo-brand">10 макетов<small>Демонстрация дизайна</small></div>
+      <button class="demo-button" id="prev" aria-label="Предыдущий макет">←</button>
+      <select class="demo-select" id="screenSelect" aria-label="Выбрать макет"></select>
+      <button class="demo-button" id="next" aria-label="Следующий макет">→</button>
+      <span class="demo-count" id="count"></span>
+      <button class="demo-button" id="themeToggle" aria-label="Сменить тему">🌙 Тёмная тема</button>
+      <button class="demo-button" id="resetTheme" title="Вернуть тему, заданную для каждого макета">Тема по макету</button>
+      <span class="demo-note">Макеты показывают внешний вид и основные состояния</span>
+    </div>
+    <div class="stage"><div class="site" id="site"></div></div>
+  </div>
+  <script>
+    const screens = [
+      ['catalog', '01 · Каталог опубликованных тестов', 'light'],
+      ['admin', '02 · Мои тесты и черновики', 'light'],
+      ['editor', '03 · Ручное создание вопроса', 'light'],
+      ['paste', '04 · Вставка полного вопроса', 'light'],
+      ['copy', '05 · Перенос вопросов из другого теста', 'light'],
+      ['start', '06 · Страница перед началом теста', 'light'],
+      ['quiz', '07 · Прохождение теста', 'light'],
+      ['wrong', '08 · Неправильный ответ', 'dark'],
+      ['result', '09 · Результат и разбор ошибок', 'dark'],
+      ['history', '10 · История попыток', 'light']
+    ];
+    let current = 0;
+    let quizQuestion = 12;
+    let themeOverride = localStorage.getItem('quiz-mockup-theme');
+    let currentTheme = themeOverride || screens[0][2];
+    const site = document.getElementById('site');
+    const select = document.getElementById('screenSelect');
+    select.innerHTML = screens.map((s,i) => `<option value="${i}">${s[1]}</option>`).join('');
+    const btn = (label, action, cls = '') => `<button class="button ${cls}" data-action="${action}">${label}</button>`;
+    function head(active = 'catalog', creator = false, quiz = false) {
+      return `<header class="site-head"><div class="logo"><span class="logo-mark">✓</span> Тесты</div>${quiz ? `<span class="muted small">/ &nbsp; 1С: основы</span>` : `<nav class="site-nav"><button class="${active==='catalog'?'active':''}" data-screen="0">Все тесты</button><button class="${active==='history'?'active':''}" data-screen="9">История</button>${creator?`<button class="${active==='admin'?'active':''}" data-screen="1">Мои тесты</button>`:''}</nav>`}<span class="head-spacer"></span>${quiz?`<span class="small muted">◷ &nbsp;12:34</span>`:btn(creator?'Конструктор':'Для создателя','admin','subtle')}<button class="icon-button" data-action="theme" aria-label="Сменить тему">${currentTheme==='dark'?'☀':'☾'}</button>${creator?'<span class="avatar">Я</span>':''}</header>`;
+    }
+    function catalog() {
+      const tests = [
+        ['1С: основы', '50 вопросов', '▣', 'start'], ['1С: продолжение', '300 вопросов', '▤', 'start'], ['Бухгалтерский учёт', '40 вопросов', '▥', 'start'],
+        ['Информационные системы', '25 вопросов', '◈', 'start'], ['Менеджмент', '30 вопросов', '◇', 'start'], ['Архивный тест', '60 вопросов', '▧', 'closed']
+      ];
+      return head('catalog')+`<main class="page wide"><div class="eyebrow">Каталог</div><div class="between wrap"><div><h1>Доступные тесты</h1><p class="muted">Выберите тест и проверьте свои знания.</p></div><label class="search">⌕ <input placeholder="Поиск по названию теста" aria-label="Поиск"></label></div><div class="test-grid">${tests.map(t=>`<article class="card test-card"><div class="symbol">${t[2]}</div><h3>${t[0]}</h3><p class="muted">${t[1]}</p>${t[3]==='closed'?'<span class="pill bad">Закрыт</span>':btn('Начать тест','start','primary full')}</article>`).join('')}</div></main>`;
+    }
+    function admin() {
+      const tests = [
+        ['1С: основы', 'Черновик', 'warn', '12 вопросов', 'Продолжить', 'editor'],
+        ['1С: продолжение', 'Опубликован', 'good', '300 вопросов', 'Редактировать', 'editor'],
+        ['Архивный тест', 'Закрыт', 'bad', '60 вопросов', 'Редактировать', 'editor']
+      ];
+      return head('admin', true)+`<main class="page wide"><div class="between wrap"><div><div class="eyebrow">Личный раздел</div><h1>Мои тесты</h1><p class="muted">Создавайте вопросы, проверяйте тест и управляйте публикацией.</p></div>${btn('＋ Создать тест','editor','primary large')}</div><div class="filter-tabs mt-30"><span class="active">Все · 3</span><span>Черновики · 1</span><span>Опубликованные · 1</span><span>Закрытые · 1</span></div><div class="admin-cards">${tests.map(t=>`<article class="card admin-card"><div class="between"><span class="pill ${t[2]}">${t[1]}</span><span class="muted">•••</span></div><h3>${t[0]}</h3><p class="muted small">${t[3]} · изменён сегодня</p><div class="actions">${btn(t[4],t[5],'primary')}${btn('Предпросмотр','start')}</div></article>`).join('')}</div><div class="notice mt-30">Черновики сохраняются в этом браузере и не появляются в общем каталоге до публикации.</div></main>`;
+    }
+    function editorShell() {
+      return head('admin', true)+`<div class="editor"><aside class="card editor-side"><div class="between"><h3>Вопросы</h3><span class="pill">12</span></div><div class="question-list"><div class="question-item"><b>1</b>Что такое конфигурация?</div><div class="question-item"><b>2</b>Какие объекты хранят данные?</div><div class="question-item"><b>3</b>Что такое регистр сведений?</div><div class="question-item selected"><b>4</b>Что такое информационная база?</div></div>${btn('＋ Добавить вопрос','editor','full mt-16')}</aside><main class="card editor-main"><div class="between wrap"><div><div class="eyebrow">1С: основы / Черновик</div><h2 class="mt-16">Вопрос 4</h2></div><span class="pill good">✓ Сохранено автоматически</span></div><label class="field-label">Текст вопроса</label><textarea class="textarea">Что такое информационная база учёта в 1С?</textarea><div class="between mt-22"><h3>Варианты ответа</h3><span class="muted small">Выберите один правильный</span></div><div class="option-row correct"><span class="letter">A</span><input class="radio" type="radio" name="correct" checked><input class="field" value="База данных учёта"><button class="icon-button" aria-label="Удалить вариант">×</button></div><div class="option-row"><span class="letter">B</span><input class="radio" type="radio" name="correct"><input class="field" value="Информационный список пользователей"><button class="icon-button" aria-label="Удалить вариант">×</button></div><div class="option-row"><span class="letter">C</span><input class="radio" type="radio" name="correct"><input class="field" value="Копия платформы базы"><button class="icon-button" aria-label="Удалить вариант">×</button></div><div class="option-row"><span class="letter">D</span><input class="radio" type="radio" name="correct"><input class="field" value="Описание структуры учёта"><button class="icon-button" aria-label="Удалить вариант">×</button></div><div class="option-row"><span class="letter">E</span><input class="radio" type="radio" name="correct"><input class="field" value="Информационный отчёт предприятия"><button class="icon-button" aria-label="Удалить вариант">×</button></div><div class="row wrap mt-22">${btn('＋ Добавить вариант','add-option')}${btn('▤ Вставить полный вопрос','paste','subtle')}${btn('⇄ Перенести вопросы','copy')}</div><div class="between wrap mt-30"><span class="muted small">Вариант A отмечен правильным по умолчанию.</span><div class="row">${btn('Предпросмотр','start')}${btn('Опубликовать','publish','primary')}</div></div></main><aside class="card editor-settings"><h3>Настройки теста</h3><div class="setting"><b>Вопросов в попытке</b><p>Все 12 или случайная часть</p><input class="range" type="range" min="1" max="12" value="12"><span class="small">Все 12 вопросов</span></div><div class="setting"><div class="row"><b>Перемешать вопросы</b><span class="switch"></span></div><p>Только при прохождении</p></div><div class="setting"><div class="row"><b>Перемешать ответы</b><span class="switch"></span></div><p>Только при прохождении</p></div><div class="setting"><b>Статус</b><p>Черновик · виден только вам</p></div></aside></div>`;
+    }
+    function overlayModal(type) {
+      if(type==='paste') return `<div class="overlay"><div class="modal"><div class="between"><div><div class="eyebrow">Быстрое заполнение</div><h2 class="mt-16">Вставить полный вопрос</h2></div><button class="icon-button" data-action="editor" aria-label="Закрыть">×</button></div><p class="muted small">Вставьте вопрос и ответы, каждый с новой строки. Проверьте результат перед добавлением.</p><div class="modal-grid"><div><b class="small">Исходный текст</b><textarea class="textarea sample mt-16">4. Что такое информационная база учёта в 1С?\nA) База данных учёта\nB) Информационный список пользователей\nC) Копия платформы базы\nD) Описание структуры учёта\nE) Информационный отчёт предприятия</textarea></div><div><b class="small">Будет добавлено</b><div class="parsed mt-16"><b>Вопрос</b><br>Что такое информационная база учёта в 1С?<br><br><b>Вариант 1 · правильный</b><br>База данных учёта<br><b>Вариант 2</b><br>Информационный список пользователей<br><b>Вариант 3</b><br>Копия платформы базы<br><b>Вариант 4</b><br>Описание структуры учёта<br><b>Вариант 5</b><br>Информационный отчёт предприятия</div></div></div><label class="checkline"><input type="checkbox" checked> Убирать номер вопроса и буквы вариантов ответа</label><div class="between mt-22"><span class="muted small">Правильным выбран первый вариант. Его можно изменить после вставки.</span><div class="row">${btn('Отмена','editor')}${btn('Добавить вопрос','editor','primary')}</div></div></div></div>`;
+      return `<div class="overlay"><div class="modal small-modal"><div class="between"><div><div class="eyebrow">Перенос вопросов</div><h2 class="mt-16">Добавить из другого теста</h2></div><button class="icon-button" data-action="editor" aria-label="Закрыть">×</button></div><label class="field-label">Тест-источник</label><select class="field"><option>1С: продолжение · 300 вопросов</option><option>Бухгалтерский учёт · 40 вопросов</option></select><div class="between mt-22"><b class="small">Выберите вопросы</b><button class="button subtle" data-action="all-copy">Выбрать все 300</button></div><div class="transfer-list"><label class="transfer-item"><input type="checkbox" checked> 1. Какой объект используется для хранения сведений?</label><label class="transfer-item"><input type="checkbox" checked> 2. Что представляет собой документ в 1С?</label><label class="transfer-item"><input type="checkbox" checked> 3. Для чего нужен регистр накопления?</label><label class="transfer-item"><input type="checkbox"> 4. Что такое проведение документа?</label></div><div class="notice">Если вопрос уже есть в тесте, появится предупреждение с возможностью пропустить его или всё равно добавить копию.</div><div class="between mt-22"><span class="muted small">Выбрано: 3 вопроса</span><div class="row">${btn('Отмена','editor')}${btn('Добавить копии','editor','primary')}</div></div></div></div>`;
+    }
+    function start() {
+      return head('catalog', false, true)+`<main class="page quiz-page"><div class="muted small">Каталог тестов / 1С: основы</div><div class="card start-card"><div class="start-icon">▤</div><div class="eyebrow">Готовы начать?</div><h1>1С: основы</h1><p class="muted">Проверьте знания по основным объектам и возможностям 1С.</p><div class="facts"><div class="fact"><b>50 вопросов</b><span class="muted small">из теста на 300</span></div><div class="fact"><b>Случайный порядок</b><span class="muted small">вопросов и ответов</span></div><div class="fact"><b>Без лимита</b><span class="muted small">время только измеряется</span></div></div><p class="muted small">После ответа вы сразу узнаете, верно ли ответили. Обновление страницы начнёт попытку заново.</p>${btn('Начать прохождение','quiz','primary large')}</div></main>`;
+    }
+    function quiz(wrong=false) {
+      const answers = ['Документ','Регистр сведений','Регистр накопления','Справочник','План видов характеристик'];
+      return head('catalog', false, true)+`<main class="page quiz-page"><div class="quiz-head"><div><div class="eyebrow">1С: основы</div><h1 style="font-size:25px;margin-bottom:0">Вопрос ${quizQuestion} из 50</h1></div><div class="pill">◷ 12:34 прошло</div></div><div class="progress"><span style="width:${quizQuestion*2}%"></span></div><div class="card quiz-card"><h2>${quizQuestion===12?'Какой объект в 1С предназначен для хранения справочной информации?':'Какой объект в 1С фиксирует хозяйственную операцию?'}</h2>${answers.map((a,i)=>`<button class="answer ${wrong&&i===1?'bad':''} ${wrong&&i===3?'good':''}" data-answer="${i}"><span class="answer-letter">${'ABCDE'[i]}</span><span>${a}</span>${wrong&&i===1?'<span class="answer-tag">Ваш ответ ✕</span>':''}${wrong&&i===3?'<span class="answer-tag">Правильный ответ ✓</span>':''}</button>`).join('')}${wrong?`<div class="notice mt-22" style="color:var(--bad);border-color:var(--bad)">Неправильно. Вы выбрали «Регистр сведений». Правильный ответ — «Справочник».</div>`:''}<div class="quiz-foot">${wrong?btn('Следующий вопрос →','next-question','primary large'):'<span class="muted small">Выберите один вариант ответа</span>'}</div></div></main>`;
+    }
+    function result() {
+      return head('history')+`<main class="page"><div class="eyebrow">Попытка завершена</div><h1>Результат теста</h1><div class="result-layout mt-22"><div><div class="card result-hero"><div class="between wrap"><div><h2>1С: основы</h2><p class="muted">12 октября 2026 · 18 минут 42 секунды</p></div><div class="score">76%</div></div><div class="facts" style="justify-content:flex-start;margin-bottom:0"><div class="fact"><b>38 из 50</b><span class="muted small">правильных ответов</span></div><div class="fact"><b>12 ошибок</b><span class="muted small">можно разобрать ниже</span></div></div></div><div class="between wrap mt-30"><h2>Разбор ответов</h2><div class="filter-tabs"><span>Все вопросы · 50</span><span class="active">Ошибки · 12</span></div></div><div class="card review-card"><div class="between"><h3>Вопрос 12. Какой объект хранит справочную информацию?</h3><span class="pill bad">Ошибка</span></div><div class="review-line"><b style="color:var(--bad)">Ваш ответ</b><span>Регистр сведений</span></div><div class="review-line"><b style="color:var(--good)">Правильный</b><span>Справочник</span></div></div><div class="card review-card"><div class="between"><h3>Вопрос 19. Для чего нужен регистр накопления?</h3><span class="pill bad">Ошибка</span></div><div class="review-line"><b style="color:var(--bad)">Ваш ответ</b><span>Хранение списка пользователей</span></div><div class="review-line"><b style="color:var(--good)">Правильный</b><span>Учёт количественных и суммовых данных</span></div></div></div><aside class="card" style="padding:22px"><h3>Следующий шаг</h3><p class="muted small">Повторите вопросы, в которых ошиблись, или начните новую попытку.</p>${btn('Пройти снова','start','primary full')}${btn('История попыток','history','full mt-16')}</aside></div></main>`;
+    }
+    function history() {
+      return head('history')+`<main class="page wide"><div class="eyebrow">Сохранено на этом устройстве</div><h1>История попыток</h1><p class="muted">Результаты остаются в этом браузере, пока не будут удалены данные сайта.</p><div class="card mt-30" style="overflow:auto"><table class="history-table"><thead><tr><th>Тест</th><th>Дата</th><th>Результат</th><th>Время</th><th></th></tr></thead><tbody><tr><td><b>1С: основы</b></td><td>12 окт 2026, 14:20</td><td><span class="pill good">38 из 50 · 76%</span></td><td>18:42</td><td>${btn('Посмотреть','result')}</td></tr><tr><td><b>Бухгалтерский учёт</b></td><td>11 окт 2026, 18:05</td><td><span class="pill good">26 из 30 · 87%</span></td><td>12:16</td><td>${btn('Посмотреть','result')}</td></tr><tr><td><b>Информационные системы</b></td><td>9 окт 2026, 12:36</td><td><span class="pill warn">15 из 25 · 60%</span></td><td>10:31</td><td>${btn('Посмотреть','result')}</td></tr></tbody></table></div><div class="notice mt-22">История доступна только в этом браузере и профиле. В приватном режиме она удаляется при закрытии окна.</div></main>`;
+    }
+    function render() {
+      currentTheme = themeOverride || screens[current][2];
+      site.classList.toggle('dark', currentTheme==='dark');
+      site.innerHTML = `<div class="screen-wrap">${({catalog,admin,editor:editorShell,paste:()=>editorShell()+overlayModal('paste'),copy:()=>editorShell()+overlayModal('copy'),start,quiz:()=>quiz(false),wrong:()=>quiz(true),result,history})[screens[current][0]]()}</div>`;
+      select.value = String(current);
+      document.getElementById('count').textContent = `${current+1} / ${screens.length}`;
+      document.getElementById('themeToggle').textContent = currentTheme==='dark'?'☀️ Светлая тема':'🌙 Тёмная тема';
+      window.scrollTo({top:0,behavior:'instant'});
+    }
+    function go(index) { current = Math.max(0,Math.min(screens.length-1,index)); render(); }
+    const actionIndex = {catalog:0,admin:1,editor:2,paste:3,copy:4,start:5,quiz:6,wrong:7,result:8,history:9};
+    function toggleTheme() { themeOverride = currentTheme==='dark'?'light':'dark'; localStorage.setItem('quiz-mockup-theme',themeOverride); render(); }
+    document.getElementById('prev').onclick=()=>go(current-1);
+    document.getElementById('next').onclick=()=>go(current+1);
+    select.onchange=()=>go(Number(select.value));
+    document.getElementById('themeToggle').onclick=toggleTheme;
+    document.getElementById('resetTheme').onclick=()=>{themeOverride=null;localStorage.removeItem('quiz-mockup-theme');render();};
+    site.addEventListener('click',event=>{
+      const screen=event.target.closest('[data-screen]'); if(screen){go(Number(screen.dataset.screen));return;}
+      const answer=event.target.closest('[data-answer]'); if(answer&&current===6){if(answer.dataset.answer==='3'){answer.classList.add('good'); answer.insertAdjacentHTML('beforeend','<span class="answer-tag">Верно ✓</span>'); setTimeout(()=>{quizQuestion++;go(6)},1500);}else go(7);return;}
+      const action=event.target.closest('[data-action]'); if(!action)return;
+      const value=action.dataset.action;
+      if(value==='theme'){toggleTheme();return;}
+      if(value==='next-question'){quizQuestion++;go(6);return;}
+      if(value==='publish'){alert('Макет: здесь будет публикация через ваш доступ к GitHub.');return;}
+      if(value==='add-option'){alert('Макет: здесь добавится ещё один вариант ответа без фиксированного предела.');return;}
+      if(value==='all-copy'){document.querySelectorAll('.transfer-item input').forEach(x=>x.checked=true);return;}
+      if(value in actionIndex)go(actionIndex[value]);
+    });
+    render();
+  </script>
+</body>
+</html>
