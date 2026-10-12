@@ -3,6 +3,11 @@ import assert from 'node:assert/strict';
 import {GitHub} from '../src/github.js';
 import {newQuiz,newQuestion,publishedQuiz} from '../src/core.js';
 const response=(body,status=200)=>new Response(JSON.stringify(body),{status,headers:{'Content-Type':'application/json'}});
+test('default fetch keeps the browser global receiver',async()=>{
+ const original=globalThis.fetch;
+ globalThis.fetch=function(url){assert.equal(this,globalThis);assert.equal(url,'https://api.github.com/user');return Promise.resolve(response({login:'MrP01283'}));};
+ try {const gh=new GitHub();assert.deepEqual(await gh.request('/user'),{login:'MrP01283'});} finally {globalThis.fetch=original;}
+});
 test('owner validation rejects other accounts and forgets token',async()=>{
  const gh=new GitHub(async()=>response({login:'somebody-else'}));await assert.rejects(gh.connect('test-token'),/владельцу/);assert.equal(gh.connected,false);
 });

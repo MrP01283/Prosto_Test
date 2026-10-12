@@ -4,7 +4,7 @@ import { validateCatalog, applyCatalogChange } from './core.js';
 export class GitHub {
   #token = '';
   user = null;
-  constructor(fetcher = fetch) { this.fetch = fetcher; }
+  constructor(fetcher = globalThis.fetch.bind(globalThis)) { this.fetch = fetcher; }
   get connected() { return !!this.#token; }
   disconnect() { this.#token = ''; this.user = null; }
   async request(path, options = {}) {
