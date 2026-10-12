@@ -28,7 +28,10 @@ function header(active='catalog', quiz=false) {
   return `<header class="header"><a class="brand" href="#/catalog"><img src="./assets/favicon.svg" alt="">Просто Тест</a>${quiz ? `<span class="muted small crumb">${h(state.attempt?.quiz.title ?? 'Прохождение теста')}</span>` : `<nav class="nav" aria-label="Основная навигация"><a class="${active==='catalog'?'active':''}" href="#/catalog">Все тесты</a><a class="${active==='history'?'active':''}" href="#/history">История</a>${active==='admin'?'<a class="active" href="#/admin">Мои тесты</a>':''}</nav>`}<div class="header-end">${quiz?'':active==='admin'?btn(github.connected?'GitHub подключён':'Подключить GitHub',github.connected?'account':'connect','subtle editor-only'):routeLink('Для создателя','/admin','subtle')}${themeButton()}</div></header>`;
 }
 function footer() {return `<footer class="footer"><span>Просто Тест · учитесь в своём темпе</span><span>История сохраняется в вашем браузере</span></footer>`;}
-function setContent(content, active='catalog', quiz=false) { app.innerHTML = header(active,quiz)+content+(quiz?'':footer()); }
+function setContent(content, active='catalog', quiz=false) {
+  app.innerHTML = header(active,quiz)+content+(quiz?'':footer());
+  document.title=(document.querySelector('main h1')?.textContent || (active==='admin'?'Конструктор':'Просто Тест'))+' · Просто Тест';
+}
 function storageNotice() {return state.storageError?notice(h(state.storageError),'error'):'';}
 
 function catalogCards() {
@@ -441,7 +444,7 @@ document.addEventListener('submit',async event=>{
   const field=document.querySelector('#github-token'), button=event.target.querySelector('[type=submit]');
   const token=field.value;field.value='';button.disabled=true;button.textContent='Подключаем…';connecting=true;
   dialog.querySelectorAll('[data-action=close-dialog]').forEach(el=>el.disabled=true);
-  try{await github.connect(token);await refreshAdmin();const next=pendingConnection;pendingConnection=null;closeDialog();if(next)await next();else await route();toast('GitHub подключён.');}
+  try{await github.connect(token);await refreshAdmin();const next=pendingConnection;pendingConnection=null;connecting=false;closeDialog();if(next)await next();else await route();toast('GitHub подключён.');}
   catch(error){const box=document.querySelector('#connect-error');if(box)box.innerHTML=notice(h(errorMessage(error)),'error');else reportError(error);}
   finally{connecting=false;dialog.querySelectorAll('[data-action=close-dialog]').forEach(el=>el.disabled=false);if(button.isConnected){button.disabled=false;button.textContent='Подключить';}}
 });
