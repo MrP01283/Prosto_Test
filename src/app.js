@@ -1,3 +1,4 @@
+import { rangeIds, moveSelectedQuestions, selectedNumbers } from './question-selection.js';
 import { CONFIG } from './config.js';
 import { uid, clone, escapeHTML as h, normalize, newQuiz, newQuestion, questionErrors, quizErrors, parseQuestionBlock, parseQuestionBatch, copyQuestion, mergeQuestions, prepareQuestions, allowsQuestionRange, normalizeQuestionRange, makeResult, publishedQuiz, draftFromPublic, formatDuration } from './core.js';
 import { db, requestPersistentStorage } from './storage.js';
@@ -11,6 +12,8 @@ const app = document.querySelector('#app');
 const dialog = document.querySelector('#dialog');
 let github = new GitHub();
 const state = {catalog:{schemaVersion:1,tests:[]}, remote:null, drafts:[], attempts:[], publicError:'', githubError:'', storageError:'', editor:null, selected:null, startSelection:null, route:'', attempt:null, result:null, busy:false, filter:'all', search:'', review:'all', saving:false, saveError:'', unsaved:false};
+const selection={quizId:null,mode:false,ids:new Set(),anchor:null};
+let bulkRange=null;
 let restoreAttempted=false, connectionEpoch=0;
 let saveTimer, saveQueue = Promise.resolve(), editVersion = 0, toastTimer, routeVersion = 0, pendingConnection, copyState, pasteState, batchState, confirmation, connecting=false;
 const date = value => new Intl.DateTimeFormat('ru', {day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}).format(new Date(value));
@@ -78,22 +81,70 @@ function adminCards() {
 function adminPage() {
   setContent(`<main id="main" class="page"><div class="between page-head"><div><div class="eyebrow">Конструктор</div><h1>Мои тесты</h1><p class="muted">Черновики, опубликованные тесты и управление ссылками.</p></div><div class="row wrap">${btn('Обновить','refresh-admin')}${btn('＋ Создать тест','new','primary large')}</div></div>${storageNotice()}<div class="notice mb">Черновики сохраняются на этом компьютере. Для публикации и изменения общедоступных тестов подключите GitHub владельца ${h(CONFIG.owner)}.</div><div class="tabs" aria-label="Фильтр тестов">${[['all','Все'],['draft','Черновики и правки'],['published','Опубликованные'],['closed','Закрытые']].map(([id,title])=>`<button data-action="filter" data-filter="${id}" class="${state.filter===id?'active':''}">${title}</button>`).join('')}</div><div id="admin-list">${adminCards()}</div></main>`,'admin');
 }
+function syncSelection() {
+  const quiz=state.editor;
+  if(selection.quizId!==quiz.id){selection.quizId=quiz.id;selection.mode=false;selection.ids.clear();selection.anchor=null;}
+  const existing=new Set(quiz.questions.map(q=>q.id));
+  selection.ids=new Set([...selection.ids].filter(id=>existing.has(id)));
+  if(!existing.has(selection.anchor))selection.anchor=null;
+}
 function questionList() {
-  return state.editor.questions.map((q,i)=>`<button class="q-item ${q.id===state.selected?'active':''} ${questionErrors(q).length?'invalid':''}" data-action="select-question" data-id="${h(q.id)}"><b>${i+1}</b><span>${h(q.text||'Новый вопрос')}</span></button>`).join('');
+  return state.editor.questions.map((q,i)=>`<div class="q-row ${selection.ids.has(q.id)?'checked':''}"><input type="checkbox" data-action="toggle-question" data-id="${h(q.id)}" ${selection.ids.has(q.id)?'checked':''} aria-label="Выделить вопрос ${i+1}"><button class="q-item ${q.id===state.selected?'active':''} ${questionErrors(q).length?'invalid':''}" data-action="select-question" data-id="${h(q.id)}"><b>${i+1}</b><span>${h(q.text||'Новый вопрос')}</span></button>${selection.mode?btn('✎','open-question','q-edit',`data-id="${h(q.id)}" aria-label="Редактировать вопрос ${i+1}" title="Редактировать вопрос"`):''}</div>`).join('');
+}
+function selectionTools() {
+  const count=selection.ids.size,total=state.editor.questions.length;
+  return `<div class="selection-tools">${btn(selection.mode?'Завершить выделение':'Выделить несколько','selection-mode','compact full',`aria-pressed="${selection.mode}" ${!total&&!selection.mode?'disabled':''}`)}${selection.mode?`<div class="selection-count" role="status">Выбрано: ${count} из ${total}</div><div class="selection-buttons">${btn('Все','selection-all','compact',total?'':'disabled')}${btn('Снять','selection-clear','compact',count?'':'disabled')}${btn('Диапазон…','selection-range','compact',total?'':'disabled')}</div><p class="muted small">Клик — выбрать, Shift + клик — диапазон. ✎ — редактировать.</p><div class="selection-buttons">${btn('↑ Вверх','selection-up','compact',!count||selection.ids.has(state.editor.questions[0]?.id)?'disabled':'')}${btn('↓ Вниз','selection-down','compact',!count||selection.ids.has(state.editor.questions.at(-1)?.id)?'disabled':'')}</div>${btn('Переместить перед №…','selection-move','compact full',count&&count<total?'':'disabled')}${btn('Удалить выбранные','selection-delete','compact danger full',count?'':'disabled')}` : ''}</div>`;
+}
+function toggleSelectedQuestion(id,shift=false) {
+  syncSelection();selection.mode=true;
+  const list=state.editor.questions,anchor=list.findIndex(q=>q.id===selection.anchor),index=list.findIndex(q=>q.id===id);
+  if(index<0)return;
+  if(shift&&anchor>=0)rangeIds(list,Math.min(anchor,index)+1,Math.max(anchor,index)+1).forEach(id=>selection.ids.add(id));
+  else {if(selection.ids.has(id))selection.ids.delete(id);else selection.ids.add(id);selection.anchor=id;}
+  editorPage();
+}
+function openSelectionRange() {
+  const total=state.editor.questions.length;if(!total)return;
+  const indices=state.editor.questions.flatMap((q,i)=>selection.ids.has(q.id)?[i+1]:[]);
+  bulkRange={from:indices[0]??1,to:indices.at(-1)??total,total};
+  showDialog('Выделить диапазон вопросов',`<p class="muted">Номера соответствуют текущему порядку в конструкторе. Диапазон заменит текущее выделение.</p><div class="range-slider" id="bulk-range-slider"><div class="range-track"><div class="range-fill"></div></div><input type="range" data-bulk-bound="from" min="1" max="${total}" value="${bulkRange.from}" aria-label="Начало выделения" ${total===1?'disabled':''}><input type="range" data-bulk-bound="to" min="1" max="${total}" value="${bulkRange.to}" aria-label="Конец выделения" ${total===1?'disabled':''}></div><div class="range-fields"><label class="field">От<input class="input" type="number" data-bulk-bound="from" min="1" max="${total}" step="1" value="${bulkRange.from}"></label><span class="muted">—</span><label class="field">До включительно<input class="input" type="number" data-bulk-bound="to" min="1" max="${total}" step="1" value="${bulkRange.to}"></label></div><p id="bulk-range-count" class="muted small mt"></p><div id="bulk-range-error" class="bad-text small" role="alert"></div>`,btn('Отмена','close-dialog')+btn('Выделить','selection-apply-range','primary','id="bulk-range-apply"'));
+  updateSelectionRange();
+}
+function updateSelectionRange(input=null,commit=false) {
+  const r=bulkRange;
+  if(input) {
+    const bound=input.dataset.bulkBound,min=bound==='to'?r.from:1,max=bound==='from'?r.to:r.total;
+    let value=input.valueAsNumber;
+    if(commit||input.type==='range')value=Number.isFinite(value)?Math.max(min,Math.min(max,Math.trunc(value))):r[bound];
+    else if(!Number.isInteger(value)||value<min||value>max){document.querySelector('#bulk-range-error').textContent=`Введите целое число от ${min} до ${max}.`;document.querySelector('#bulk-range-apply').disabled=true;return;}
+    r[bound]=value;
+  }
+  for(const field of dialog.querySelectorAll('[data-bulk-bound]')) {
+    if(field!==input||commit||input?.type==='range')field.value=r[field.dataset.bulkBound];
+    if(field.type==='number'){field.min=field.dataset.bulkBound==='to'?r.from:1;field.max=field.dataset.bulkBound==='from'?r.to:r.total;}
+  }
+  const slider=document.querySelector('#bulk-range-slider');slider.style.setProperty('--range-start',`${(r.from-1)/Math.max(1,r.total-1)*100}%`);slider.style.setProperty('--range-end',`${(r.to-1)/Math.max(1,r.total-1)*100}%`);
+  document.querySelector('#bulk-range-count').textContent=`Будет выделено: ${r.to-r.from+1} вопросов (№${r.from}–${r.to}).`;
+  document.querySelector('#bulk-range-error').textContent='';document.querySelector('#bulk-range-apply').disabled=false;
+}
+function applyQuestionOrder(questions) {
+  if(questions.every((q,i)=>q===state.editor.questions[i]))return;
+  state.editor.questions=questions;markDirty();editorPage();
 }
 function optionRows(question) {
   return question.options.map((o,i)=>`<div class="option-row ${o.id===question.correctOptionId?'correct':''}"><label class="radio-wrap" title="Правильный вариант"><input type="radio" name="correct-option" value="${h(o.id)}" ${o.id===question.correctOptionId?'checked':''} aria-label="Вариант ${i+1} правильный"><span class="option-number">${i+1}</span></label><textarea rows="1" data-option="${h(o.id)}" aria-label="Текст варианта ${i+1}" placeholder="Вариант ответа">${h(o.text)}</textarea><button class="icon-btn" data-action="remove-option" data-id="${h(o.id)}" ${question.options.length<=2?'disabled':''} aria-label="Удалить вариант ${i+1}" title="Удалить вариант">×</button></div>`).join('');
 }
 function editorPage() {
+  syncSelection();
   const quiz = state.editor, question = currentQuestion(), count = quiz.questions.length;
   const oldList = document.querySelector('#question-list');
   const sameQuiz = oldList?.dataset.quizId === quiz.id;
   const listScroll = sameQuiz ? oldList.scrollTop : 0;
   const pageScroll = sameQuiz ? {x:window.scrollX,y:window.scrollY} : null;
-  const restoreFocus = sameQuiz && oldList.contains(document.activeElement);
-  setContent(`<main id="main"><div class="desktop-hint card empty"><h2>Откройте конструктор на компьютере</h2><p>Проходить тесты можно с телефона. Для создания вопросов нужен широкий экран.</p>${routeLink('К тестам','/catalog','primary')}</div><div class="editor-top between wrap"><div><div class="eyebrow">${quiz.baseRevision?'Редактирование теста':'Черновик'}</div><p class="editor-title">${h(quiz.title||'Новый тест')}</p><span id="save-status" class="saved">${state.unsaved?'Сохраняем…':'✓ Сохранено в этом браузере'}</span></div><div class="editor-actions">${routeLink('Мои тесты','/admin')}${btn('Предпросмотр','preview')}${btn(quiz.baseRevision?'Опубликовать правки':'Опубликовать','publish','primary','data-remote')}</div></div><div class="editor-layout"><aside class="card editor-list"><div class="between"><h3>Вопросы</h3><span class="pill" id="question-count">${count}</span></div><div id="question-list" class="question-list" data-quiz-id="${h(quiz.id)}">${questionList()}</div><div class="stack">${btn('＋ Новый вопрос','add-question','full')}${btn('Вставить полный вопрос','paste','subtle full')}${btn('Вставить блок вопросов','paste-batch','subtle full')}${btn('Из другого теста','copy','full')}</div></aside><section class="card editor-main">${question?`<div class="between wrap"><div><div class="eyebrow">Один правильный ответ</div><h2 class="mt-sm">Вопрос ${quiz.questions.indexOf(question)+1}</h2></div><div class="row">${btn('↑','move-up','compact',`aria-label="Переместить вопрос вверх" ${quiz.questions.indexOf(question)===0?'disabled':''}`)}${btn('↓','move-down','compact',`aria-label="Переместить вопрос вниз" ${quiz.questions.indexOf(question)===count-1?'disabled':''}`)}${btn('Удалить вопрос','remove-question','compact danger')}</div></div><label class="field mt" for="question-text">Текст вопроса</label><textarea id="question-text" name="question-text" rows="3" placeholder="Введите вопрос">${h(question.text)}</textarea><div class="between mt"><h3>Варианты ответа</h3><span class="muted small">Минимум два</span></div><div id="option-rows">${optionRows(question)}</div><div class="row wrap mt">${btn('＋ Добавить вариант','add-option')}${btn('Заменить из текста','paste-replace','subtle')}</div><p class="muted small mt">Кружком слева отметьте правильный вариант. При добавлении нового вопроса выбран первый.</p>`:empty('Добавьте первый вопрос','Введите его вручную или вставьте вопрос и все ответы одним блоком.',btn('＋ Новый вопрос','add-question','primary'))}</section><aside class="card editor-settings"><h3>Настройки теста</h3><div class="setting"><div class="row">${iconHTML(quiz.icon)}<div><b class="small">Иконка теста</b><div>${btn("Изменить","edit-icon","link")}</div></div></div></div><div class="setting"><label class="field" for="quiz-title">Название</label><input class="input" id="quiz-title" name="quiz-title" value="${h(quiz.title)}" placeholder="Название теста"><label class="field mt" for="quiz-description">Описание · необязательно</label><textarea id="quiz-description" name="quiz-description" rows="2" placeholder="Кратко о тесте">${h(quiz.description)}</textarea></div><div class="setting"><div class="setting-title">Вопросов в попытке</div><label class="check"><input type="radio" name="count-mode" value="all" ${quiz.settings.questionCount===null?'checked':''}>Все (${count})</label><label class="check mt-sm"><input type="radio" name="count-mode" value="part" ${quiz.settings.questionCount!==null?'checked':''} ${count<2?'disabled':''}>Случайная часть</label><div id="count-controls" class="${quiz.settings.questionCount===null?'hidden':''}"><input type="range" name="question-count-range" min="1" max="${Math.max(1,count-1)}" value="${quiz.settings.questionCount??Math.max(1,count-1)}" aria-label="Количество вопросов"><input class="input" type="number" name="question-count-number" min="1" max="${Math.max(1,count-1)}" value="${quiz.settings.questionCount??Math.max(1,count-1)}" aria-label="Точное количество вопросов"></div><label class="check mt"><input type="checkbox" name="allow-question-range" ${allowsQuestionRange(quiz)?'checked':''} ${quiz.settings.questionCount!==null?'disabled':''}>Разрешить выбор диапазона участнику</label><p>${quiz.settings.questionCount!==null?'Выбор диапазона недоступен при случайной части. Выберите «Все», чтобы включить его.':'Участник сможет выбрать номера вопросов перед началом. Настройка применяется после публикации.'}</p></div><div class="setting"><label class="check"><input type="checkbox" name="shuffle-questions" ${allowsQuestionRange(quiz)||quiz.settings.shuffleQuestions?'checked':''} ${allowsQuestionRange(quiz)?'disabled':''}>Перемешивать вопросы</label><label class="check mt"><input type="checkbox" name="shuffle-options" ${quiz.settings.shuffleOptions?'checked':''}>Перемешивать ответы</label><p>${allowsQuestionRange(quiz)?'Выбранный участником диапазон всегда перемешивается при прохождении.':'Настройки действуют при прохождении.'} Порядок в конструкторе сохраняется.</p></div><div class="setting">${btn('Создать отдельную копию','duplicate','full')}<p>Полезно для нового теста или сохранения правок при конфликте публикации.</p></div></aside></div></main>`,'admin');
+  const focused = sameQuiz && oldList.contains(document.activeElement) ? {action:document.activeElement.dataset.action,id:document.activeElement.dataset.id} : null;
+  setContent(`<main id="main"><div class="desktop-hint card empty"><h2>Откройте конструктор на компьютере</h2><p>Проходить тесты можно с телефона. Для создания вопросов нужен широкий экран.</p>${routeLink('К тестам','/catalog','primary')}</div><div class="editor-top between wrap"><div><div class="eyebrow">${quiz.baseRevision?'Редактирование теста':'Черновик'}</div><p class="editor-title">${h(quiz.title||'Новый тест')}</p><span id="save-status" class="saved">${state.unsaved?'Сохраняем…':'✓ Сохранено в этом браузере'}</span></div><div class="editor-actions">${routeLink('Мои тесты','/admin')}${btn('Предпросмотр','preview')}${btn(quiz.baseRevision?'Опубликовать правки':'Опубликовать','publish','primary','data-remote')}</div></div><div class="editor-layout"><aside class="card editor-list"><div class="between"><h3>Вопросы</h3><span class="pill" id="question-count">${count}</span></div>${selectionTools()}<div id="question-list" class="question-list" data-quiz-id="${h(quiz.id)}">${questionList()}</div><div class="stack">${btn('＋ Новый вопрос','add-question','full')}${btn('Вставить полный вопрос','paste','subtle full')}${btn('Вставить блок вопросов','paste-batch','subtle full')}${btn('Из другого теста','copy','full')}</div></aside><section class="card editor-main">${question?`<div class="between wrap"><div><div class="eyebrow">Один правильный ответ</div><h2 class="mt-sm">Вопрос ${quiz.questions.indexOf(question)+1}</h2></div><div class="row">${btn('↑','move-up','compact',`aria-label="Переместить вопрос вверх" ${quiz.questions.indexOf(question)===0?'disabled':''}`)}${btn('↓','move-down','compact',`aria-label="Переместить вопрос вниз" ${quiz.questions.indexOf(question)===count-1?'disabled':''}`)}${btn('Удалить вопрос','remove-question','compact danger')}</div></div><label class="field mt" for="question-text">Текст вопроса</label><textarea id="question-text" name="question-text" rows="3" placeholder="Введите вопрос">${h(question.text)}</textarea><div class="between mt"><h3>Варианты ответа</h3><span class="muted small">Минимум два</span></div><div id="option-rows">${optionRows(question)}</div><div class="row wrap mt">${btn('＋ Добавить вариант','add-option')}${btn('Заменить из текста','paste-replace','subtle')}</div><p class="muted small mt">Кружком слева отметьте правильный вариант. При добавлении нового вопроса выбран первый.</p>`:empty('Добавьте первый вопрос','Введите его вручную или вставьте вопрос и все ответы одним блоком.',btn('＋ Новый вопрос','add-question','primary'))}</section><aside class="card editor-settings"><h3>Настройки теста</h3><div class="setting"><div class="row">${iconHTML(quiz.icon)}<div><b class="small">Иконка теста</b><div>${btn("Изменить","edit-icon","link")}</div></div></div></div><div class="setting"><label class="field" for="quiz-title">Название</label><input class="input" id="quiz-title" name="quiz-title" value="${h(quiz.title)}" placeholder="Название теста"><label class="field mt" for="quiz-description">Описание · необязательно</label><textarea id="quiz-description" name="quiz-description" rows="2" placeholder="Кратко о тесте">${h(quiz.description)}</textarea></div><div class="setting"><div class="setting-title">Вопросов в попытке</div><label class="check"><input type="radio" name="count-mode" value="all" ${quiz.settings.questionCount===null?'checked':''}>Все (${count})</label><label class="check mt-sm"><input type="radio" name="count-mode" value="part" ${quiz.settings.questionCount!==null?'checked':''} ${count<2?'disabled':''}>Случайная часть</label><div id="count-controls" class="${quiz.settings.questionCount===null?'hidden':''}"><input type="range" name="question-count-range" min="1" max="${Math.max(1,count-1)}" value="${quiz.settings.questionCount??Math.max(1,count-1)}" aria-label="Количество вопросов"><input class="input" type="number" name="question-count-number" min="1" max="${Math.max(1,count-1)}" value="${quiz.settings.questionCount??Math.max(1,count-1)}" aria-label="Точное количество вопросов"></div><label class="check mt"><input type="checkbox" name="allow-question-range" ${allowsQuestionRange(quiz)?'checked':''} ${quiz.settings.questionCount!==null?'disabled':''}>Разрешить выбор диапазона участнику</label><p>${quiz.settings.questionCount!==null?'Выбор диапазона недоступен при случайной части. Выберите «Все», чтобы включить его.':'Участник сможет выбрать номера вопросов перед началом. Настройка применяется после публикации.'}</p></div><div class="setting"><label class="check"><input type="checkbox" name="shuffle-questions" ${allowsQuestionRange(quiz)||quiz.settings.shuffleQuestions?'checked':''} ${allowsQuestionRange(quiz)?'disabled':''}>Перемешивать вопросы</label><label class="check mt"><input type="checkbox" name="shuffle-options" ${quiz.settings.shuffleOptions?'checked':''}>Перемешивать ответы</label><p>${allowsQuestionRange(quiz)?'Выбранный участником диапазон всегда перемешивается при прохождении.':'Настройки действуют при прохождении.'} Порядок в конструкторе сохраняется.</p></div><div class="setting">${btn('Создать отдельную копию','duplicate','full')}<p>Полезно для нового теста или сохранения правок при конфликте публикации.</p></div></aside></div></main>`,'admin');
   document.querySelector('#question-list').scrollTop = listScroll;
-  if (restoreFocus) document.querySelector('.q-item.active')?.focus({preventScroll:true});
+  if (focused) [...document.querySelectorAll('#question-list [data-action]')].find(el=>el.dataset.action===focused.action&&el.dataset.id===focused.id)?.focus({preventScroll:true});
   if (pageScroll) window.scrollTo(pageScroll.x,pageScroll.y);
   updateSaveStatus();
 }
@@ -403,7 +454,7 @@ async function route() {
   }
   if(state.editor&&path!==`/edit/${state.editor.id}`){
     try{await flushDraft();}catch(error){history.replaceState(null,'',link(state.route));reportError(error);return;}
-    state.editor=null;
+    state.editor=null;selection.quizId=null;selection.ids.clear();selection.mode=false;selection.anchor=null;
   }
   closeDialog();
   state.route=path;state.search='';
@@ -454,7 +505,7 @@ async function route() {
 }
 
 function reportError(error) {toast(errorMessage(error));}
-async function handleAction(action,element) {
+async function handleAction(action,element,event={}) {
   const id=element?.dataset.id;
   if(action==='theme'){
     const theme=document.documentElement.dataset.theme==='dark'?'light':'dark';document.documentElement.dataset.theme=theme;
@@ -485,7 +536,29 @@ async function handleAction(action,element) {
   if(action==='delete'){await deleteQuiz(id);return;}
   if(action==='share'){showDialog('Ссылка на тест',`<input class="input" id="share-url" readonly aria-label="Ссылка на тест" value="${h(testURL(id))}">`,btn('Скопировать','copy-share','primary'));return;}
   if(action==='copy-share'){const input=document.querySelector('#share-url');try{await navigator.clipboard.writeText(input.value);toast('Ссылка скопирована.');}catch{input.focus();input.select();toast('Скопируйте выделенную ссылку сочетанием Ctrl+C.');}return;}
-  if(action==='select-question'){state.selected=id;editorPage();return;}
+  if(action==='selection-mode'){selection.mode=!selection.mode;if(!selection.mode){selection.ids.clear();selection.anchor=null;}editorPage();return;}
+  if(action==='selection-all'){selection.ids=new Set(state.editor.questions.map(q=>q.id));editorPage();return;}
+  if(action==='selection-clear'){selection.ids.clear();selection.anchor=null;editorPage();return;}
+  if(action==='selection-range'){openSelectionRange();return;}
+  if(action==='selection-apply-range'){selection.ids=new Set(rangeIds(state.editor.questions,bulkRange.from,bulkRange.to));selection.anchor=state.editor.questions[bulkRange.from-1].id;closeDialog();editorPage();return;}
+  if(action==='toggle-question'||action==='select-question'&&(selection.mode||event.shiftKey)){toggleSelectedQuestion(id,event.shiftKey);return;}
+  if(action==='select-question'||action==='open-question'){state.selected=id;selection.anchor=id;editorPage();return;}
+  if(action==='selection-up'||action==='selection-down'){applyQuestionOrder(moveSelectedQuestions(state.editor.questions,selection.ids,action==='selection-up'?'up':'down'));return;}
+  if(action==='selection-move'){
+    showDialog('Переместить выбранные вопросы',`<p>Выбрано: ${selection.ids.size}. Вопросы соберутся в один блок с сохранением взаимного порядка.</p><label class="field" for="bulk-destination">Перед вопросом № (по текущему списку)</label><input class="input" id="bulk-destination" type="number" min="1" max="${state.editor.questions.length}" step="1" placeholder="Номер вопроса"><div id="bulk-move-error" class="bad-text small mt-sm" role="alert"></div>`,btn('Отмена','close-dialog')+btn('В конец','selection-move-end')+btn('Переместить','selection-move-apply','primary'));return;
+  }
+  if(action==='selection-move-apply'||action==='selection-move-end'){
+    try{const target=action==='selection-move-end'?state.editor.questions.length+1:document.querySelector('#bulk-destination').valueAsNumber;const questions=moveSelectedQuestions(state.editor.questions,selection.ids,target);closeDialog();applyQuestionOrder(questions);}catch(error){document.querySelector('#bulk-move-error').textContent=errorMessage(error);}return;
+  }
+  if(action==='selection-delete'){
+    const quiz=state.editor,ids=new Set(selection.ids);if(!ids.size)return;
+    if(!(await ask('Удалить выбранные вопросы?',`Будет удалено: ${ids.size}. Номера: ${selectedNumbers(quiz.questions,ids)}. Удаление сохранится в черновике. Для изменения публичного теста нужна публикация.`,'Удалить',true)))return;
+    if(state.editor!==quiz)return;
+    const activeIndex=quiz.questions.findIndex(q=>q.id===state.selected);quiz.questions=quiz.questions.filter(q=>!ids.has(q.id));
+    if(ids.has(state.selected))state.selected=quiz.questions[Math.min(activeIndex,quiz.questions.length-1)]?.id;
+    if(quiz.settings.questionCount!==null)quiz.settings.questionCount=quiz.questions.length<2?null:Math.min(quiz.settings.questionCount,quiz.questions.length-1);
+    selection.ids.clear();selection.anchor=null;markDirty();editorPage();toast(`Удалено вопросов: ${ids.size}.`);return;
+  }
   if(action==='add-question'){const q=newQuestion();state.editor.questions.push(q);state.selected=q.id;markDirty();editorPage();return;}
   if(action==='remove-question'){
     if(!(await ask('Удалить вопрос?','Вопрос и его варианты ответа будут удалены из черновика.','Удалить',true)))return;
@@ -538,10 +611,11 @@ async function handleAction(action,element) {
 document.addEventListener('click',event=>{
   if(event.target.closest('.skip-link')){event.preventDefault();const main=document.querySelector('#main');main?.setAttribute('tabindex','-1');main?.focus();main?.scrollIntoView();return;}
   const el=event.target.closest('[data-action]');if(!el||el.disabled)return;
-  event.preventDefault();handleAction(el.dataset.action,el).catch(reportError);
+  event.preventDefault();handleAction(el.dataset.action,el,event).catch(reportError);
 });
 document.addEventListener('input',event=>{
   const el=event.target;
+  if(el.dataset.bulkBound){updateSelectionRange(el);return;}
   if(el.dataset.rangeBound){updateQuestionRange(el);return;}
   if(el.name==='catalog-search'){state.search=el.value;document.querySelector('#catalog-list').innerHTML=catalogCards();return;}
   if(el.id==='paste-text'||el.id==='strip-prefixes'){updatePaste();return;}
@@ -569,6 +643,7 @@ document.addEventListener('input',event=>{
 document.addEventListener('change',event=>{
   const el=event.target;
   if(el.id==='remember-github'){document.querySelector('#vault-password-field').hidden=!el.checked||hasVaultSession();document.querySelector('#vault-password').required=el.checked&&!hasVaultSession();return;}
+  if(el.dataset.bulkBound){updateSelectionRange(el,true);return;}
   if(el.dataset.rangeBound){updateQuestionRange(el,true);return;}
   if(el.name==='question-count-number')el.value=state.editor.settings.questionCount;
   if(el.id==='copy-source'){copyState.source=copyState.sources.find(q=>q.id===el.value);copyState.selected.clear();renderCopyList();}
