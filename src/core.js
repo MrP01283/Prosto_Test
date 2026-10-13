@@ -1,3 +1,5 @@
+import { normalizeIcon, validIcon } from './icons.js';
+
 export const uid = () => crypto.randomUUID();
 export const clone = value => structuredClone(value);
 export const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -10,7 +12,7 @@ export function newQuestion() {
 
 export function newQuiz() {
   const now = new Date().toISOString();
-  return {id: uid(), title: '', description: '', questions: [],
+  return {id: uid(), title: '', description: '', icon: normalizeIcon(), questions: [],
     settings: {questionCount: null, allowQuestionRange: true, shuffleQuestions: true, shuffleOptions: true},
     status: 'draft', createdAt: now, updatedAt: now, baseRevision: null, dirty: true};
 }
@@ -27,6 +29,7 @@ export function questionErrors(question) {
 export function quizErrors(quiz) {
   const errors = [];
   if (!quiz.title.trim()) errors.push('Укажите название теста.');
+  if (quiz.icon !== undefined && !validIcon(quiz.icon)) errors.push('Выберите стандартную иконку или загрузите изображение заново.');
   if (!quiz.questions.length) errors.push('Добавьте хотя бы один вопрос.');
   quiz.questions.forEach((q, i) => questionErrors(q).forEach(error => errors.push(`Вопрос ${i + 1}: ${error}`)));
   const count = quiz.settings.questionCount;
@@ -180,7 +183,7 @@ export function prepareQuestions(quiz, random = Math.random, range = null) {
 export function makeResult(quiz, questions, answers, startedAt, finishedAt = Date.now(), questionRange = null) {
   const entries = questions.map((q, i) => ({...clone(q), selectedOptionId: answers[i] ?? null, correct: answers[i] === q.correctOptionId}));
   const correct = entries.filter(q => q.correct).length;
-  return {id: uid(), quizId: quiz.id, title: quiz.title, revision: quiz.revision ?? null,
+  return {id: uid(), quizId: quiz.id, title: quiz.title, icon: normalizeIcon(quiz.icon), revision: quiz.revision ?? null,
     questionRange: questionRange ? {...normalizeQuestionRange(quiz.questions.length, questionRange), poolSize: quiz.questions.length} : null,
     startedAt, finishedAt, durationMs: Math.max(0, finishedAt - startedAt),
     total: entries.length, correct, wrong: entries.length - correct,
@@ -188,7 +191,7 @@ export function makeResult(quiz, questions, answers, startedAt, finishedAt = Dat
 }
 
 export function publishedQuiz(draft, status = 'published') {
-  return {id: draft.id, title: draft.title.trim(), description: draft.description.trim(),
+  return {id: draft.id, title: draft.title.trim(), description: draft.description.trim(), icon: normalizeIcon(draft.icon),
     questions: draft.questions.map(q => ({id: q.id, text: q.text.trim(), options: q.options.map(o => ({id: o.id, text: o.text.trim()})), correctOptionId: q.correctOptionId})),
     settings: {...clone(draft.settings), allowQuestionRange: allowsQuestionRange(draft)}, status, createdAt: draft.createdAt,
     updatedAt: new Date().toISOString(), revision: uid()};
