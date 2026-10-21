@@ -2,9 +2,11 @@ let database;
 export async function openDB() {
   if (database) return database;
   database = new Promise((resolve, reject) => {
-    const request = indexedDB.open('prosto-test-v1', 1);
+    const request = indexedDB.open('prosto-test-v1', 2);
     request.onupgradeneeded = () => {
-      for (const store of ['drafts', 'attempts']) request.result.createObjectStore(store, {keyPath: 'id'});
+      for (const store of ['drafts', 'attempts', 'activeAttempts']) {
+        if (!request.result.objectStoreNames.contains(store)) request.result.createObjectStore(store, {keyPath: 'id'});
+      }
     };
     request.onsuccess = () => {
       request.result.onversionchange = () => {request.result.close(); database = null;};
@@ -30,6 +32,17 @@ export const db = {
   put: (store, value) => transaction(store, 'readwrite', s => s.put(structuredClone(value))),
   remove: (store, id) => transaction(store, 'readwrite', s => s.delete(id)),
 };
+// The stable attempt ID makes finishing idempotent, even if the page reloads at completion.
+export async function completeAttempt(result, activeId) {
+  const database = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx=database.transaction(['attempts','activeAttempts'],'readwrite');
+    tx.objectStore('attempts').put(structuredClone(result));
+    tx.objectStore('activeAttempts').delete(activeId);
+    tx.oncomplete=()=>resolve();
+    tx.onerror=tx.onabort=()=>reject(new Error('Не удалось сохранить результат. Повторите сохранение.'));
+  });
+}
 export async function requestPersistentStorage() {
   try { return await navigator.storage?.persist?.(); } catch { return false; }
 }
