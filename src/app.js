@@ -578,7 +578,13 @@ async function handleAction(action,element,event={}) {
     try {
       if(!(await checkAccess(a,true))){closeRestartMenu();return;}
       if(state.attempt!==a)return;
-      const questions=action==='restart-same'?shuffle(clone(a.questions)).map(q=>({...q,options:a.quiz.settings.shuffleOptions?shuffle(q.options):q.options})):prepareQuestions(a.quiz,Math.random,a.questionRange);
+      if(action==='restart-new'){
+        a.done=true;
+        try{await discardProgress(a.quiz.id,a.preview);}catch(error){a.done=false;throw error;}
+        stopAttempt();closeRestartMenu();state.savedAttempt=null;
+        location.hash=link(`/${a.preview?'preview':'test'}/${a.quiz.id}`);return;
+      }
+      const questions=shuffle(clone(a.questions)).map(q=>({...q,options:a.quiz.settings.shuffleOptions?shuffle(q.options):q.options}));
       a.done=true;stopAttempt();closeRestartMenu();
       await beginAttempt(a.quiz,a.preview,a.questionRange,{questions});playPage();window.scrollTo(0,0);
     }catch(error){buttons.forEach(b=>b.disabled=false);closeRestartMenu();throw error;}
