@@ -24919,7 +24919,7 @@
           "options": [
             {
               "id": "4fff8939-b195-46cf-bc75-6fb8eb0854ee",
-              "text": "Задача (Task)"
+              "text": "Задача"
             },
             {
               "id": "56e15163-41e2-4ed6-b48b-6721044e183f",
@@ -32482,8 +32482,8 @@
       },
       "status": "published",
       "createdAt": "2026-11-01T08:28:01.546Z",
-      "updatedAt": "2026-11-01T08:30:19.748Z",
-      "revision": "7226e94d-3ec8-4ffa-ac27-fa7ccb481ff9"
+      "updatedAt": "2026-11-01T09:32:12.654Z",
+      "revision": "62f8bded-16eb-406e-9d04-15442a29dfc5"
     }
   ]
 }
