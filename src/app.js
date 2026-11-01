@@ -1,6 +1,6 @@
 import { rangeIds, moveSelectedQuestions, selectedNumbers } from './question-selection.js';
 import { CONFIG } from './config.js';
-import { uid, clone, escapeHTML as h, normalize, newQuiz, newQuestion, questionErrors, quizErrors, parseQuestionBlock, parseQuestionBatch, copyQuestion, mergeQuestions, prepareQuestions, allowsQuestionRange, normalizeQuestionRange, makeResult, publishedQuiz, draftFromPublic, formatDuration } from './core.js';
+import { uid, clone, shuffle, escapeHTML as h, normalize, newQuiz, newQuestion, questionErrors, quizErrors, parseQuestionBlock, parseQuestionBatch, copyQuestion, mergeQuestions, prepareQuestions, allowsQuestionRange, normalizeQuestionRange, makeResult, publishedQuiz, draftFromPublic, formatDuration } from './core.js';
 import { activeAttemptKey, elapsedAttempt, pauseAttempt, snapshotAttempt, validAttemptSnapshot } from './attempt-progress.js';
 import { db, completeAttempt, requestPersistentStorage } from './storage.js';
 import { GitHub, loadPublicCatalog } from './github.js';
@@ -19,6 +19,7 @@ const mobileView=()=>mobileMedia.matches;
 const playerPrefs={side:'right'};
 try{const saved=JSON.parse(localStorage.getItem('prosto-test-player'));if(saved){playerPrefs.side=saved.side==='left'?'left':'right';}}catch{}
 let progressQueue=Promise.resolve();
+let restartMenuAttempt=null;
 let bulkRange=null;
 let restoreAttempted=false, connectionEpoch=0;
 let saveTimer, saveQueue = Promise.resolve(), editVersion = 0, toastTimer, routeVersion = 0, pendingConnection, copyState, pasteState, batchState, confirmation, connecting=false;
@@ -42,6 +43,7 @@ function header(active='catalog', quiz=false) {
   return `<header class="header"><a class="brand" href="#/catalog"><img src="./assets/logo.svg" alt=""><span>Prosto Test</span></a>${quiz ? `<span class="muted small crumb">${iconHTML(state.attempt?.quiz.icon,'small')}${h(state.attempt?.quiz.title ?? 'Прохождение теста')}</span>` : `<nav class="nav" aria-label="Основная навигация"><a class="${active==='catalog'?'active':''}" href="#/catalog">Все тесты</a><a class="${active==='history'?'active':''}" href="#/history">История</a>${active==='admin'?'<a class="active" href="#/admin">Мои тесты</a>':''}</nav>`}<div class="header-end">${quiz?'':active==='admin'?btn(github.connected?'GitHub подключён':'Подключить GitHub',github.connected?'account':'connect','subtle editor-only')+btn('Выйти','creator-logout','subtle'):routeLink('Для создателя','/admin','subtle')}${themeButton()}</div></header>`;
 }
 function setContent(content, active='catalog', quiz=false) {
+  closeRestartMenu();
   document.body.classList.toggle('board-mode',quiz);
   app.innerHTML = header(active,quiz)+(active==='admin'&&state.githubError?notice(h(state.githubError),'error'):'')+content;
   document.title=(document.querySelector('main h1')?.textContent || (active==='admin'?'Конструктор':'Prosto Test'))+' · Prosto Test';
@@ -214,11 +216,20 @@ function updateQuestionRange(input,commit=false) {
 function rangeLabel(result) {return result.questionRange?`Вопросы №${result.questionRange.from}–${result.questionRange.to} из ${result.questionRange.poolSize}`:'';}
 function unavailable(title,text) {setContent(`<main id="main" class="page narrow">${empty(h(title),h(text),routeLink('Все тесты','/catalog','primary'))}</main>`);}
 
+function closeRestartMenu() {
+  const a=restartMenuAttempt;if(!a)return;
+  restartMenuAttempt=null;
+  const menu=document.querySelector('#restart-menu');if(menu)menu.hidden=true;
+  document.querySelector('[data-action=restart-attempt]')?.setAttribute('aria-expanded','false');
+  if(state.attempt===a&&!a.done){a.checking=false;if(a.answers[a.index]===a.questions[a.index].correctOptionId)a.advance=setTimeout(()=>nextQuestion().catch(reportError),CONFIG.correctDelay);}
+}
+document.addEventListener('keydown',event=>{if(event.key==='Escape'&&restartMenuAttempt){closeRestartMenu();document.querySelector('[data-action=restart-attempt]')?.focus();}});
+
 function playPage() {
   const a=state.attempt;
   if (!a) return;
   const q=a.questions[a.index], selected=a.answers[a.index], answered=selected!==undefined, correct=selected===q.correctOptionId;
-  setContent(`<main id="main" class="quiz-page"><div class="player-tools">${btn(playerPrefs.side==='left'?'Кнопка: слева':'Кнопка: справа','player-side','compact',`aria-label="Положение кнопки перехода: ${playerPrefs.side==='left'?'слева':'справа'}"`)}${btn('Начать заново','restart-attempt','compact')}</div>${a.saveError?notice(h(a.saveError)+' Прогресс пока не сохранён.','error'):''}${a.preview?notice('Предпросмотр · без записи в историю','warning'):''}${a.blocked?notice(`${h(a.blocked)} ${btn('Проверить соединение','retry-status','compact')}`,'error'):''}<div class="quiz-top mt-sm"><div><div class="eyebrow">${h(a.quiz.title)}</div><h1>Вопрос ${a.index+1} из ${a.questions.length}</h1>${a.questionRange?`<span class="muted small">№${q.originalIndex} в общем списке · диапазон ${a.questionRange.from}–${a.questionRange.to}</span>`:''}</div><span class="pill">◷ <span id="elapsed">${formatDuration(elapsedAttempt(a))}</span></span></div><progress class="progress" max="${a.questions.length}" value="${a.index}" aria-label="Прогресс"></progress><section class="card quiz-card"><h2>${h(q.text)}</h2>${q.options.map((o,i)=>`<button class="answer ${answered&&o.id===q.correctOptionId?'good':''} ${answered&&o.id===selected&&!correct?'bad':''}" data-action="answer" data-id="${h(o.id)}" ${answered||a.checking||a.blocked?'disabled':''}><span class="letter">${i<26?String.fromCharCode(65+i):i+1}</span><span class="answer-text">${h(o.text)}</span>${answered&&o.id===q.correctOptionId?'<span class="answer-tag">✓ Правильный ответ</span>':''}${answered&&o.id===selected&&!correct?'<span class="answer-tag">✕ Ваш ответ</span>':''}</button>`).join('')}<div class="feedback ${playerPrefs.side==='left'?'feedback-left':''}" aria-live="polite">${answered?(correct?'<span class="good-text">✓ Верно</span>':`<span class="bad-text">Неверно</span>${btn(a.index===a.questions.length-1?'Посмотреть результат':'Следующий вопрос →','next-question','primary large')}`):`<span class="muted small">${a.checking?'Проверяем доступность теста…':''}</span>`}</div></section></main>`,'catalog',true);
+  setContent(`<main id="main" class="quiz-page"><div class="player-tools">${btn(playerPrefs.side==='left'?'Кнопка: слева':'Кнопка: справа','player-side','compact',`aria-label="Положение кнопки перехода: ${playerPrefs.side==='left'?'слева':'справа'}"`)}<div class="restart-control">${btn('Начать заново','restart-attempt','primary compact','aria-expanded="false" aria-controls="restart-menu"')}<div id="restart-menu" class="restart-menu card" hidden aria-label="Начать заново">${btn('С выбранными вопросами','restart-same','full')}${btn('С новыми вопросами','restart-new','full')}</div></div></div>${a.saveError?notice(h(a.saveError)+' Прогресс пока не сохранён.','error'):''}${a.preview?notice('Предпросмотр · без записи в историю','warning'):''}${a.blocked?notice(`${h(a.blocked)} ${btn('Проверить соединение','retry-status','compact')}`,'error'):''}<div class="quiz-top mt-sm"><div><div class="eyebrow">${h(a.quiz.title)}</div><h1>Вопрос ${a.index+1} из ${a.questions.length}</h1>${a.questionRange?`<span class="muted small">№${q.originalIndex} в общем списке · диапазон ${a.questionRange.from}–${a.questionRange.to}</span>`:''}</div><span class="pill">◷ <span id="elapsed">${formatDuration(elapsedAttempt(a))}</span></span></div><progress class="progress" max="${a.questions.length}" value="${a.index}" aria-label="Прогресс"></progress><section class="card quiz-card"><h2>${h(q.text)}</h2>${q.options.map((o,i)=>`<button class="answer ${answered&&o.id===q.correctOptionId?'good':''} ${answered&&o.id===selected&&!correct?'bad':''}" data-action="answer" data-id="${h(o.id)}" ${answered||a.checking||a.blocked?'disabled':''}><span class="letter">${i<26?String.fromCharCode(65+i):i+1}</span><span class="answer-text">${h(o.text)}</span>${answered&&o.id===q.correctOptionId?'<span class="answer-tag">✓ Правильный ответ</span>':''}${answered&&o.id===selected&&!correct?'<span class="answer-tag">✕ Ваш ответ</span>':''}</button>`).join('')}<div class="feedback ${playerPrefs.side==='left'?'feedback-left':''}" aria-live="polite">${answered?(correct?'<span class="good-text">✓ Верно</span>':`<span class="bad-text">Неверно</span>${btn(a.index===a.questions.length-1?'Посмотреть результат':'Следующий вопрос →','next-question','primary large')}`):`<span class="muted small">${a.checking?'Проверяем доступность теста…':''}</span>`}</div></section></main>`,'catalog',true);
 }
 
 function reviewCards(result) {
@@ -555,22 +566,22 @@ async function handleAction(action,element,event={}) {
     try{localStorage.setItem('prosto-test-player',JSON.stringify(playerPrefs));}catch{}playPage();return;
   }
   if(action==='restart-attempt'){
+    if(restartMenuAttempt){closeRestartMenu();return;}
     const a=state.attempt;if(!a||a.done||a.checking)return;
-    clearTimeout(a.advance);a.checking=true;
-    showDialog('Начать заново?', '<p>Ответы и время текущей попытки будут сброшены.</p><p>С выбранными вопросами — повторить тот же набор и порядок. С новыми — заново выбрать вопросы по настройкам теста и текущему диапазону. Если выбраны все вопросы или диапазон, состав останется тем же.</p>',btn('Отмена','close-dialog')+btn('С выбранными вопросами','restart-same','primary')+btn('С новыми вопросами','restart-new'));
-    dialog.addEventListener('close',()=>{if(state.attempt===a&&!a.done){a.checking=false;if(a.answers[a.index]===a.questions[a.index].correctOptionId)a.advance=setTimeout(()=>nextQuestion().catch(reportError),CONFIG.correctDelay);}},{once:true});
-    return;
+    clearTimeout(a.advance);a.checking=true;restartMenuAttempt=a;
+    document.querySelector('#restart-menu').hidden=false;
+    element.setAttribute('aria-expanded','true');return;
   }
   if(action==='restart-same'||action==='restart-new'){
-    const a=state.attempt;if(!a||a.done||!dialog.open)return;
-    const buttons=[...dialog.querySelectorAll('button')];buttons.forEach(b=>b.disabled=true);
+    const a=state.attempt;if(!a||a.done||restartMenuAttempt!==a)return;
+    const buttons=[...document.querySelectorAll('.restart-control button')];buttons.forEach(b=>b.disabled=true);
     try {
-      if(!(await checkAccess(a,true))){closeDialog();return;}
+      if(!(await checkAccess(a,true))){closeRestartMenu();return;}
       if(state.attempt!==a)return;
-      const questions=action==='restart-same'?clone(a.questions):prepareQuestions(a.quiz,Math.random,a.questionRange);
-      a.done=true;stopAttempt();closeDialog();
+      const questions=action==='restart-same'?shuffle(clone(a.questions)).map(q=>({...q,options:a.quiz.settings.shuffleOptions?shuffle(q.options):q.options})):prepareQuestions(a.quiz,Math.random,a.questionRange);
+      a.done=true;stopAttempt();closeRestartMenu();
       await beginAttempt(a.quiz,a.preview,a.questionRange,{questions});playPage();window.scrollTo(0,0);
-    }catch(error){buttons.forEach(b=>b.disabled=false);throw error;}
+    }catch(error){buttons.forEach(b=>b.disabled=false);closeRestartMenu();throw error;}
     return;
   }
   if(action==='resume-attempt'){
@@ -679,6 +690,7 @@ async function handleAction(action,element,event={}) {
 }
 
 document.addEventListener('click',event=>{
+  if(restartMenuAttempt&&!event.target.closest('.restart-control'))closeRestartMenu();
   if(event.target.closest('.skip-link')){event.preventDefault();const main=document.querySelector('#main');main?.setAttribute('tabindex','-1');main?.focus();main?.scrollIntoView();return;}
   const el=event.target.closest('[data-action]');if(!el||el.disabled)return;
   event.preventDefault();handleAction(el.dataset.action,el,event).catch(reportError);
