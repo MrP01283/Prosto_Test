@@ -16,8 +16,8 @@ const state = {catalog:{schemaVersion:1,tests:[]}, remote:null, drafts:[], attem
 const selection={quizId:null,mode:false,ids:new Set(),anchor:null};
 const mobileMedia=matchMedia('(max-width: 760px)');
 const mobileView=()=>mobileMedia.matches;
-const playerPrefs={side:'right',board:false};
-try{const saved=JSON.parse(localStorage.getItem('prosto-test-player'));if(saved){playerPrefs.side=saved.side==='left'?'left':'right';playerPrefs.board=saved.board===true;}}catch{}
+const playerPrefs={side:'right'};
+try{const saved=JSON.parse(localStorage.getItem('prosto-test-player'));if(saved){playerPrefs.side=saved.side==='left'?'left':'right';}}catch{}
 let progressQueue=Promise.resolve();
 let bulkRange=null;
 let restoreAttempted=false, connectionEpoch=0;
@@ -42,7 +42,7 @@ function header(active='catalog', quiz=false) {
   return `<header class="header"><a class="brand" href="#/catalog"><img src="./assets/logo.svg" alt=""><span>Prosto Test</span></a>${quiz ? `<span class="muted small crumb">${iconHTML(state.attempt?.quiz.icon,'small')}${h(state.attempt?.quiz.title ?? 'Прохождение теста')}</span>` : `<nav class="nav" aria-label="Основная навигация"><a class="${active==='catalog'?'active':''}" href="#/catalog">Все тесты</a><a class="${active==='history'?'active':''}" href="#/history">История</a>${active==='admin'?'<a class="active" href="#/admin">Мои тесты</a>':''}</nav>`}<div class="header-end">${quiz?'':active==='admin'?btn(github.connected?'GitHub подключён':'Подключить GitHub',github.connected?'account':'connect','subtle editor-only')+btn('Выйти','creator-logout','subtle'):routeLink('Для создателя','/admin','subtle')}${themeButton()}</div></header>`;
 }
 function setContent(content, active='catalog', quiz=false) {
-  document.body.classList.toggle('board-mode',quiz&&playerPrefs.board);
+  document.body.classList.toggle('board-mode',quiz);
   app.innerHTML = header(active,quiz)+(active==='admin'&&state.githubError?notice(h(state.githubError),'error'):'')+content;
   document.title=(document.querySelector('main h1')?.textContent || (active==='admin'?'Конструктор':'Prosto Test'))+' · Prosto Test';
 }
@@ -218,7 +218,7 @@ function playPage() {
   const a=state.attempt;
   if (!a) return;
   const q=a.questions[a.index], selected=a.answers[a.index], answered=selected!==undefined, correct=selected===q.correctOptionId;
-  setContent(`<main id="main" class="quiz-page"><div class="player-tools">${btn(playerPrefs.side==='left'?'Кнопка: слева':'Кнопка: справа','player-side','compact',`aria-label="Положение кнопки перехода: ${playerPrefs.side==='left'?'слева':'справа'}"`)}${btn('Режим доски','player-board',`compact ${playerPrefs.board?'subtle':''}`,`aria-pressed="${playerPrefs.board}"`)}</div>${a.saveError?notice(h(a.saveError)+' Прогресс пока не сохранён.','error'):''}${a.preview?notice('Предпросмотр · без записи в историю','warning'):''}${a.blocked?notice(`${h(a.blocked)} ${btn('Проверить соединение','retry-status','compact')}`,'error'):''}<div class="quiz-top mt-sm"><div><div class="eyebrow">${h(a.quiz.title)}</div><h1>Вопрос ${a.index+1} из ${a.questions.length}</h1>${a.questionRange?`<span class="muted small">№${q.originalIndex} в общем списке · диапазон ${a.questionRange.from}–${a.questionRange.to}</span>`:''}</div><span class="pill">◷ <span id="elapsed">${formatDuration(elapsedAttempt(a))}</span></span></div><progress class="progress" max="${a.questions.length}" value="${a.index}" aria-label="Прогресс"></progress><section class="card quiz-card"><h2>${h(q.text)}</h2>${q.options.map((o,i)=>`<button class="answer ${answered&&o.id===q.correctOptionId?'good':''} ${answered&&o.id===selected&&!correct?'bad':''}" data-action="answer" data-id="${h(o.id)}" ${answered||a.checking||a.blocked?'disabled':''}><span class="letter">${i<26?String.fromCharCode(65+i):i+1}</span><span class="answer-text">${h(o.text)}</span>${answered&&o.id===q.correctOptionId?'<span class="answer-tag">✓ Правильный ответ</span>':''}${answered&&o.id===selected&&!correct?'<span class="answer-tag">✕ Ваш ответ</span>':''}</button>`).join('')}<div class="feedback ${playerPrefs.side==='left'?'feedback-left':''}" aria-live="polite">${answered?(correct?'<span class="good-text">✓ Верно</span>':`<span class="bad-text">Неверно</span>${btn(a.index===a.questions.length-1?'Посмотреть результат':'Следующий вопрос →','next-question','primary large')}`):`<span class="muted small">${a.checking?'Проверяем доступность теста…':''}</span>`}</div></section></main>`,'catalog',true);
+  setContent(`<main id="main" class="quiz-page"><div class="player-tools">${btn(playerPrefs.side==='left'?'Кнопка: слева':'Кнопка: справа','player-side','compact',`aria-label="Положение кнопки перехода: ${playerPrefs.side==='left'?'слева':'справа'}"`)}${btn('Начать заново','restart-attempt','compact')}</div>${a.saveError?notice(h(a.saveError)+' Прогресс пока не сохранён.','error'):''}${a.preview?notice('Предпросмотр · без записи в историю','warning'):''}${a.blocked?notice(`${h(a.blocked)} ${btn('Проверить соединение','retry-status','compact')}`,'error'):''}<div class="quiz-top mt-sm"><div><div class="eyebrow">${h(a.quiz.title)}</div><h1>Вопрос ${a.index+1} из ${a.questions.length}</h1>${a.questionRange?`<span class="muted small">№${q.originalIndex} в общем списке · диапазон ${a.questionRange.from}–${a.questionRange.to}</span>`:''}</div><span class="pill">◷ <span id="elapsed">${formatDuration(elapsedAttempt(a))}</span></span></div><progress class="progress" max="${a.questions.length}" value="${a.index}" aria-label="Прогресс"></progress><section class="card quiz-card"><h2>${h(q.text)}</h2>${q.options.map((o,i)=>`<button class="answer ${answered&&o.id===q.correctOptionId?'good':''} ${answered&&o.id===selected&&!correct?'bad':''}" data-action="answer" data-id="${h(o.id)}" ${answered||a.checking||a.blocked?'disabled':''}><span class="letter">${i<26?String.fromCharCode(65+i):i+1}</span><span class="answer-text">${h(o.text)}</span>${answered&&o.id===q.correctOptionId?'<span class="answer-tag">✓ Правильный ответ</span>':''}${answered&&o.id===selected&&!correct?'<span class="answer-tag">✕ Ваш ответ</span>':''}</button>`).join('')}<div class="feedback ${playerPrefs.side==='left'?'feedback-left':''}" aria-live="polite">${answered?(correct?'<span class="good-text">✓ Верно</span>':`<span class="bad-text">Неверно</span>${btn(a.index===a.questions.length-1?'Посмотреть результат':'Следующий вопрос →','next-question','primary large')}`):`<span class="muted small">${a.checking?'Проверяем доступность теста…':''}</span>`}</div></section></main>`,'catalog',true);
 }
 
 function reviewCards(result) {
@@ -433,12 +433,12 @@ function saveProgress(a=state.attempt) {
   return progressQueue;
 }
 async function discardProgress(id,preview=false) {await progressQueue;await db.remove('activeAttempts',activeAttemptKey(id,preview));}
-async function beginAttempt(quiz,preview=false,range=null) {
-  const version=routeVersion,saved=await readProgress(quiz.id,preview);if(version!==routeVersion)return;
+async function beginAttempt(quiz,preview=false,range=null,fresh=null) {
+  const version=routeVersion,saved=fresh?null:await readProgress(quiz.id,preview);if(version!==routeVersion)return;
   const errors=quizErrors(saved?.quiz??quiz);if(errors.length){showErrors(errors);return;}
   stopAttempt();
   const questionRange=saved?.questionRange??(allowsQuestionRange(quiz)?normalizeQuestionRange(quiz.questions.length,range??{}):null);
-  state.attempt={...(saved??{}),attemptId:saved?.attemptId??uid(),quiz:clone(saved?.quiz??quiz),questionRange,questions:saved?.questions??prepareQuestions(quiz,Math.random,questionRange),answers:saved?.answers??[],index:saved?.index??0,startedAt:saved?.startedAt??Date.now(),elapsedMs:saved?.elapsedMs??0,activeSince:document.hidden?null:performance.now(),lastCheck:Date.now(),preview,blocked:'',saveError:'',checking:false,done:false,timer:null,advance:null,poll:null};
+  state.attempt={...(saved??{}),attemptId:saved?.attemptId??uid(),quiz:clone(saved?.quiz??quiz),questionRange,questions:fresh?.questions??saved?.questions??prepareQuestions(quiz,Math.random,questionRange),answers:saved?.answers??[],index:saved?.index??0,startedAt:saved?.startedAt??Date.now(),elapsedMs:saved?.elapsedMs??0,activeSince:document.hidden?null:performance.now(),lastCheck:Date.now(),preview,blocked:'',saveError:'',checking:false,done:false,timer:null,advance:null,poll:null};
   const a=state.attempt;
   a.timer=setInterval(()=>{const elapsed=document.querySelector('#elapsed');if(elapsed)elapsed.textContent=formatDuration(elapsedAttempt(a));if(!document.hidden)saveProgress(a);},1000);
   if(!preview)a.poll=setInterval(()=>checkAccess(a).catch(error=>{if(state.attempt===a){a.blocked=errorMessage(error);playPage();}}),CONFIG.statusInterval);
@@ -550,9 +550,28 @@ async function handleAction(action,element,event={}) {
   const id=element?.dataset.id;
   if(mobileView()&&new Set(['new','publish','toggle-status','delete','edit-icon','add-question','remove-question','add-option','remove-option','move-up','move-down','paste','paste-replace','apply-paste','paste-batch','apply-batch','copy','apply-copy','duplicate','selection-mode','selection-all','selection-clear','selection-range','selection-apply-range','toggle-question','selection-up','selection-down','selection-move','selection-move-apply','selection-move-end','selection-delete']).has(action)){toast('На телефоне доступен только просмотр.');return;}
   if(action==='mobile-question'){if(state.editor?.questions.some(q=>q.id===id)){state.selected=id;mobileEditorPage();document.querySelector('.mobile-question')?.scrollIntoView({block:'start'});}return;}
-  if(action==='player-side'||action==='player-board'){
-    if(action==='player-side')playerPrefs.side=playerPrefs.side==='right'?'left':'right';else playerPrefs.board=!playerPrefs.board;
+  if(action==='player-side'){
+    playerPrefs.side=playerPrefs.side==='right'?'left':'right';
     try{localStorage.setItem('prosto-test-player',JSON.stringify(playerPrefs));}catch{}playPage();return;
+  }
+  if(action==='restart-attempt'){
+    const a=state.attempt;if(!a||a.done||a.checking)return;
+    clearTimeout(a.advance);a.checking=true;
+    showDialog('Начать заново?', '<p>Ответы и время текущей попытки будут сброшены.</p><p>С выбранными вопросами — повторить тот же набор и порядок. С новыми — заново выбрать вопросы по настройкам теста и текущему диапазону. Если выбраны все вопросы или диапазон, состав останется тем же.</p>',btn('Отмена','close-dialog')+btn('С выбранными вопросами','restart-same','primary')+btn('С новыми вопросами','restart-new'));
+    dialog.addEventListener('close',()=>{if(state.attempt===a&&!a.done){a.checking=false;if(a.answers[a.index]===a.questions[a.index].correctOptionId)a.advance=setTimeout(()=>nextQuestion().catch(reportError),CONFIG.correctDelay);}},{once:true});
+    return;
+  }
+  if(action==='restart-same'||action==='restart-new'){
+    const a=state.attempt;if(!a||a.done||!dialog.open)return;
+    const buttons=[...dialog.querySelectorAll('button')];buttons.forEach(b=>b.disabled=true);
+    try {
+      if(!(await checkAccess(a,true))){closeDialog();return;}
+      if(state.attempt!==a)return;
+      const questions=action==='restart-same'?clone(a.questions):prepareQuestions(a.quiz,Math.random,a.questionRange);
+      a.done=true;stopAttempt();closeDialog();
+      await beginAttempt(a.quiz,a.preview,a.questionRange,{questions});playPage();window.scrollTo(0,0);
+    }catch(error){buttons.forEach(b=>b.disabled=false);throw error;}
+    return;
   }
   if(action==='resume-attempt'){
     const saved=state.savedAttempt;if(!saved)return;const r=saved.questionRange;location.hash=link(`/${saved.preview?'run-preview':'run'}/${id}${r?`?from=${r.from}&to=${r.to}`:''}`);return;
