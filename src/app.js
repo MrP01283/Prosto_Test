@@ -1,5 +1,5 @@
 import './interaction.js';
-import './header-dots.js';
+import {headerAnimationEnabled,setHeaderAnimation} from './header-dots.js';
 import { rangeIds, moveSelectedQuestions, selectedNumbers } from './question-selection.js';
 import { CONFIG } from './config.js';
 import { uid, clone, shuffle, escapeHTML as h, normalize, newQuiz, newQuestion, questionErrors, quizErrors, parseQuestionBlock, parseQuestionBatch, copyQuestion, mergeQuestions, prepareQuestions, allowsQuestionRange, normalizeQuestionRange, makeResult, publishedQuiz, draftFromPublic, formatDuration } from './core.js';
@@ -41,8 +41,12 @@ function toast(text) {
 }
 function errorMessage(error) { return error instanceof Error ? error.message : 'Не удалось выполнить действие. Повторите попытку.'; }
 function themeButton() {return `<button class="icon-btn" data-action="theme" aria-label="${document.documentElement.dataset.theme==='dark'?'Светлая':'Тёмная'} тема" title="Переключить тему">${document.documentElement.dataset.theme==='dark'?'☀':'☾'}</button>`;}
+function headerAnimationButton(){
+  const enabled=headerAnimationEnabled(),label=enabled?'Отключить анимацию шапки':'Включить анимацию шапки';
+  return `<button class="icon-btn" data-action="header-animation" aria-label="${label}" title="${label}" aria-pressed="${enabled}"><svg class="header-motion-icon" viewBox="0 0 24 24" aria-hidden="true">${enabled?'<path d="M8 5v14M16 5v14"/>':'<path d="m9 5 10 7-10 7Z"/>'}</svg></button>`;
+}
 function header(active='catalog', quiz=false) {
-  return `<header class="header"><canvas class="header-pattern" aria-hidden="true"></canvas><a class="brand" href="#/catalog"><img src="./assets/logo.svg" alt=""><span>Prosto Test</span></a>${quiz ? `<span class="muted small crumb">${iconHTML(state.attempt?.quiz.icon,'small')}${h(state.attempt?.quiz.title ?? 'Прохождение теста')}</span>` : `<nav class="nav" aria-label="Основная навигация"><a class="${active==='catalog'?'active':''}" href="#/catalog">Все тесты</a><a class="${active==='history'?'active':''}" href="#/history">История</a>${active==='admin'?'<a class="active" href="#/admin">Мои тесты</a>':''}</nav>`}<div class="header-end">${quiz?'':active==='admin'?btn(github.connected?'GitHub подключён':'Подключить GitHub',github.connected?'account':'connect','subtle editor-only')+btn('Выйти','creator-logout','subtle'):routeLink('Для создателя','/admin','subtle')}${themeButton()}</div></header>`;
+  return `<header class="header"><canvas class="header-pattern" aria-hidden="true"></canvas><a class="brand" href="#/catalog"><img src="./assets/logo.svg" alt=""><span>Prosto Test</span></a>${quiz ? `<span class="muted small crumb">${iconHTML(state.attempt?.quiz.icon,'small')}${h(state.attempt?.quiz.title ?? 'Прохождение теста')}</span>` : `<nav class="nav" aria-label="Основная навигация"><a class="${active==='catalog'?'active':''}" href="#/catalog">Все тесты</a><a class="${active==='history'?'active':''}" href="#/history">История</a>${active==='admin'?'<a class="active" href="#/admin">Мои тесты</a>':''}</nav>`}<div class="header-end">${quiz?'':active==='admin'?btn(github.connected?'GitHub подключён':'Подключить GitHub',github.connected?'account':'connect','subtle editor-only')+btn('Выйти','creator-logout','subtle'):routeLink('Для создателя','/admin','subtle')}${headerAnimationButton()}${themeButton()}</div></header>`;
 }
 function setContent(content, active='catalog', quiz=false) {
   closeRestartMenu();
@@ -729,6 +733,11 @@ async function handleAction(action,element,event={}) {
   }
   if(action==='resume-attempt'){
     const saved=state.savedAttempt;if(!saved)return;const r=saved.questionRange;location.hash=link(`/${saved.preview?'run-preview':'run'}/${id}${selectionQuery(r)}`);return;
+  }
+  if(action==='header-animation'){
+    setHeaderAnimation(!headerAnimationEnabled());
+    element.outerHTML=headerAnimationButton();
+    document.querySelector('[data-action=header-animation]')?.focus({preventScroll:true});return;
   }
   if(action==='theme'){
     const theme=document.documentElement.dataset.theme==='dark'?'light':'dark';document.documentElement.dataset.theme=theme;

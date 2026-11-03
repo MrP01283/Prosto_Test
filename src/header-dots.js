@@ -1,12 +1,21 @@
 // A diagonal radius wave on a fixed grid. The small header is the only painted area.
 const app=document.querySelector('#app'),reducedMotion=matchMedia('(prefers-reduced-motion: reduce)');
+let enabled=true;
+try{enabled=localStorage.getItem('prosto-test-header-animation')!=='off';}catch{}
+document.documentElement.dataset.headerAnimation=enabled?'on':'off';
+export const headerAnimationEnabled=()=>enabled;
+export function setHeaderAnimation(value){
+  enabled=!!value;document.documentElement.dataset.headerAnimation=enabled?'on':'off';
+  try{localStorage.setItem('prosto-test-header-animation',enabled?'on':'off');}catch{}
+  syncAnimation();
+}
 let canvas,context,width=0,height=0,points=[],frame=0,lastFrame=0,visible=true;
 const resizeObserver=new ResizeObserver(resize);
 const intersectionObserver=new IntersectionObserver(entries=>{
   for(const entry of entries)if(entry.target===canvas){visible=entry.isIntersecting;syncAnimation();}
 });
 function draw(time){
-  if(!context)return;
+  if(!context||!enabled)return;
   context.clearRect(0,0,width,height);
   context.beginPath();
   // Equal phase for equal x+y: growth travels from the upper left to lower right.
@@ -19,13 +28,14 @@ function draw(time){
 }
 function tick(time){
   frame=0;
-  if(!canvas||document.hidden||!visible||reducedMotion.matches)return;
+  if(!canvas||!enabled||document.hidden||!visible||reducedMotion.matches)return;
   if(time-lastFrame>=1000/30){draw(time);lastFrame=time;}
   frame=requestAnimationFrame(tick);
 }
 function syncAnimation(){
   cancelAnimationFrame(frame);frame=0;
   if(!canvas)return;
+  if(!enabled){context.clearRect(0,0,width,height);return;}
   if(reducedMotion.matches){draw(performance.now());return;}
   if(!document.hidden&&visible)frame=requestAnimationFrame(tick);
 }
