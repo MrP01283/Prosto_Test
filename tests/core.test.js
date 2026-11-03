@@ -86,3 +86,16 @@ test('range results retain the selected bounds and original question numbers',()
  assert.deepEqual(result.questions.map(item=>item.originalIndex).sort((a,b)=>a-b),[50,51,52]);
  assert.equal(makeResult(q,questions,answers,1000).questionRange,null);
 });
+
+test('participant random count samples whole pool independently of range and respects admin restrictions',()=>{
+ const q=quiz(300),original=clone(q),selection={mode:'random',count:30,from:50,to:51};
+ const chosen=prepareQuestions(q,()=>0.2,selection);
+ assert.equal(chosen.length,30);assert.equal(new Set(chosen.map(q=>q.id)).size,30);
+ assert.ok(chosen.some(q=>q.originalIndex<50||q.originalIndex>51));assert.deepEqual(q,original);
+ assert.equal(prepareQuestions(q,Math.random,{mode:'random',count:999}).length,300);
+ assert.equal(prepareQuestions(q,Math.random,{mode:'random',count:-1}).length,1);
+ const result=makeResult(q,chosen,[],1000,2000,selection);
+ assert.deepEqual(result.questionRange,{mode:'random',count:30,poolSize:300});
+ q.settings.allowQuestionRange=false;assert.equal(prepareQuestions(q,Math.random,selection).length,300);
+ q.settings.questionCount=12;assert.equal(prepareQuestions(q,Math.random,selection).length,12);
+});

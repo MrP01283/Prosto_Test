@@ -163,6 +163,7 @@ export function normalizeQuestionRange(total, range = {}) {
     const number = value === '' || value == null ? fallback : Number(value);
     return Number.isFinite(number) ? Math.max(1, Math.min(total, Math.trunc(number))) : fallback;
   };
+  if(range.mode==='random')return {mode:'random',count:bound(range.count,total)};
   const from = bound(range.from, 1);
   return {from, to: Math.max(from, bound(range.to, total))};
 }
@@ -170,8 +171,8 @@ export function normalizeQuestionRange(total, range = {}) {
 export function prepareQuestions(quiz, random = Math.random, range = null) {
   let questions = clone(quiz.questions).map((q, i) => ({...q, originalIndex: i + 1}));
   const selectedRange = range && allowsQuestionRange(quiz) ? normalizeQuestionRange(questions.length, range) : null;
-  if (selectedRange) questions = questions.slice(selectedRange.from - 1, selectedRange.to);
-  const count = quiz.settings.questionCount ?? questions.length;
+  if (selectedRange && selectedRange.mode!=='random') questions = questions.slice(selectedRange.from - 1, selectedRange.to);
+  const count = selectedRange?.mode==='random'?selectedRange.count:quiz.settings.questionCount ?? questions.length;
   // A limited subset is always random; the question-order toggle controls its displayed order.
   if (count < questions.length) questions = shuffle(questions, random).slice(0, count);
   if (selectedRange || quiz.settings.shuffleQuestions) questions = shuffle(questions, random);
