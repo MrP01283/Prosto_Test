@@ -164,6 +164,13 @@ export function normalizeQuestionRange(total, range = {}) {
     return Number.isFinite(number) ? Math.max(1, Math.min(total, Math.trunc(number))) : fallback;
   };
   if(range.mode==='random')return {mode:'random',count:bound(range.count,total)};
+  if(Array.isArray(range.ranges)){
+    if(!range.ranges.length)throw new Error('Добавьте хотя бы один диапазон.');
+    const sorted=range.ranges.map(r=>{const from=bound(r.from,1);return {from,to:Math.max(from,bound(r.to,total))};}).sort((a,b)=>a.from-b.from);
+    const merged=[];
+    for(const r of sorted){const last=merged.at(-1);if(last&&r.from<=last.to+1)last.to=Math.max(last.to,r.to);else merged.push({...r});}
+    return merged.length===1?merged[0]:{ranges:merged};
+  }
   const from = bound(range.from, 1);
   return {from, to: Math.max(from, bound(range.to, total))};
 }
@@ -171,7 +178,10 @@ export function normalizeQuestionRange(total, range = {}) {
 export function prepareQuestions(quiz, random = Math.random, range = null) {
   let questions = clone(quiz.questions).map((q, i) => ({...q, originalIndex: i + 1}));
   const selectedRange = range && allowsQuestionRange(quiz) ? normalizeQuestionRange(questions.length, range) : null;
-  if (selectedRange && selectedRange.mode!=='random') questions = questions.slice(selectedRange.from - 1, selectedRange.to);
+  if (selectedRange && selectedRange.mode!=='random') {
+    const ranges=selectedRange.ranges??[selectedRange];
+    questions=questions.filter(q=>ranges.some(r=>q.originalIndex>=r.from&&q.originalIndex<=r.to));
+  }
   const count = selectedRange?.mode==='random'?selectedRange.count:quiz.settings.questionCount ?? questions.length;
   // A limited subset is always random; the question-order toggle controls its displayed order.
   if (count < questions.length) questions = shuffle(questions, random).slice(0, count);

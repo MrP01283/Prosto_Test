@@ -1,0 +1,9 @@
+/* Range rows stay independent while their union determines the question count. */
+.participant-range-row{padding:16px 0;border-bottom:1px solid var(--line)}
+.participant-range-row:first-child{padding-top:8px}
+#participant-ranges{min-width:0}
+#start-question-note{overflow-wrap:anywhere}
+.quiz-page>.player-tools{margin:24px 0 0;padding-top:16px;border-top:1px solid var(--line)}
+.quiz-page>.player-tools .restart-menu{top:auto;bottom:calc(100% + 8px)}
+#participant-random input[type=range]{width:100%;min-height:44px}
+@media(max-width:760px){.quiz-page>.player-tools{margin-top:18px}.question-range .check{min-height:44px}.participant-range-row .range-fields{gap:8px}}

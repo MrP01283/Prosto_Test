@@ -1,3 +1,4 @@
+import './interaction.js';
 import { rangeIds, moveSelectedQuestions, selectedNumbers } from './question-selection.js';
 import { CONFIG } from './config.js';
 import { uid, clone, shuffle, escapeHTML as h, normalize, newQuiz, newQuestion, questionErrors, quizErrors, parseQuestionBlock, parseQuestionBatch, copyQuestion, mergeQuestions, prepareQuestions, allowsQuestionRange, normalizeQuestionRange, makeResult, publishedQuiz, draftFromPublic, formatDuration } from './core.js';
@@ -104,11 +105,13 @@ function mobileAdminPage() {
 }
 function mobileEditorPage() {
   const quiz=state.editor,q=currentQuestion(),index=quiz.questions.indexOf(q);
+  const previousList=document.querySelector(".mobile-question-list"),listOpen=previousList?.open??false,listScroll=previousList?.querySelector(".question-list")?.scrollTop??0;
   setContent(`<main id="main" class="page mobile-reader"><div class="between">${routeLink('Мои тесты','/admin','compact')}<span class="pill">Только просмотр</span></div><h1>${h(quiz.title||'Без названия')}</h1><details class="card mobile-question-list"><summary>Вопросы · ${quiz.questions.length}</summary><div class="question-list">${quiz.questions.map((item,i)=>`<button class="q-item ${item.id===state.selected?'active':''}" data-action="mobile-question" data-id="${h(item.id)}"><b>${i+1}</b><span>${h(item.text||'Без текста')}</span></button>`).join('')}</div></details>${q?`<section class="card mobile-question"><div class="eyebrow">Вопрос ${index+1} из ${quiz.questions.length}</div><h2 class="pre">${h(q.text||'Без текста')}</h2><div class="review-options">${q.options.map(o=>`<div class="review-option ${o.id===q.correctOptionId?'good':''}"><span class="pre grow">${h(o.text||'Пустой вариант')}</span>${o.id===q.correctOptionId?'<span class="pill good">Правильный ответ</span>':''}</div>`).join('')}</div><div class="between mt">${btn('← Назад','mobile-question','',`data-id="${h(quiz.questions[index-1]?.id??'')}" ${index===0?'disabled':''}`)}${btn('Далее →','mobile-question','',`data-id="${h(quiz.questions[index+1]?.id??'')}" ${index===quiz.questions.length-1?'disabled':''}`)}</div></section>`:empty('Вопросов пока нет','')}</main>`,'admin');
+  const list=document.querySelector('.mobile-question-list');list.open=listOpen;list.querySelector('.question-list').scrollTop=listScroll;
 }
 
 function questionList() {
-  return state.editor.questions.map((q,i)=>`<div class="q-row ${selection.ids.has(q.id)?'checked':''}"><input type="checkbox" data-action="toggle-question" data-id="${h(q.id)}" ${selection.ids.has(q.id)?'checked':''} aria-label="Выделить вопрос ${i+1}"><button class="q-item ${q.id===state.selected?'active':''} ${questionErrors(q).length?'invalid':''}" data-action="select-question" data-id="${h(q.id)}"><b>${i+1}</b><span>${h(q.text||'Новый вопрос')}</span></button>${selection.mode?btn('✎','open-question','q-edit',`data-id="${h(q.id)}" aria-label="Редактировать вопрос ${i+1}" title="Редактировать вопрос"`):''}</div>`).join('');
+  return state.editor.questions.map((q,i)=>`<div class="q-row ${selection.ids.has(q.id)?'checked':''}">${selection.mode?`<input type="checkbox" data-action="toggle-question" data-id="${h(q.id)}" ${selection.ids.has(q.id)?'checked':''} aria-label="Выделить вопрос ${i+1}">`:""}<button class="q-item ${q.id===state.selected?'active':''} ${questionErrors(q).length?'invalid':''}" data-action="select-question" data-id="${h(q.id)}"><b>${i+1}</b><span>${h(q.text||'Новый вопрос')}</span></button>${selection.mode?btn('✎','open-question','q-edit',`data-id="${h(q.id)}" aria-label="Редактировать вопрос ${i+1}" title="Редактировать вопрос"`):''}</div>`).join('');
 }
 function selectionTools() {
   const count=selection.ids.size,total=state.editor.questions.length;
@@ -176,14 +179,23 @@ async function startPage(quiz, preview=false) {
   const version=routeVersion;
   state.savedAttempt=await readProgress(quiz.id,preview);if(version!==routeVersion)return;
   const total = quiz.settings.questionCount ?? quiz.questions.length;
-  state.startSelection = allowsQuestionRange(quiz) && quiz.questions.length ? {id:quiz.id,total:quiz.questions.length,from:1,to:quiz.questions.length,mode:'range',count:Math.min(30,quiz.questions.length)} : null;
+  state.startSelection = allowsQuestionRange(quiz) && quiz.questions.length ? {id:quiz.id,total:quiz.questions.length,ranges:[{from:1,to:quiz.questions.length}],mode:'range',count:Math.min(30,quiz.questions.length)} : null;
   setContent(`<main id="main" class="page narrow">${preview?notice('Пробное прохождение. Результат не попадёт в историю.','warning'):''}<section class="card start-card">${iconHTML(quiz.icon,"large")}${preview?'<div class="eyebrow">Предпросмотр</div>':''}<h1>${h(quiz.title)}</h1>${quiz.description?`<p class="muted pre">${h(quiz.description)}</p>`:''}<div class="facts"><div class="fact"><b id="start-question-count">${total} вопросов</b><small id="start-question-note">${total<quiz.questions.length?`случайно из ${quiz.questions.length}`:'все вопросы теста'}</small></div><div class="fact"><b>Без лимита</b></div><div class="fact"><b>Один ответ</b></div></div>${state.startSelection?questionRangeControls():''}${state.savedAttempt?`<p class="muted small">Продолжить с вопроса ${state.savedAttempt.index+1} из ${state.savedAttempt.questions.length}${state.savedAttempt.questionRange?` · ${h(rangeLabel(state.savedAttempt))}`:''}</p>${btn('Продолжить','resume-attempt','primary large',`data-id="${h(quiz.id)}"`)} `:''}${btn(state.savedAttempt?'Начать заново':'Начать прохождение',preview?'start-preview':'start-test','primary large',`id="start-attempt" data-id="${h(quiz.id)}"`)}${preview?`<div class="mt">${routeLink('Вернуться в конструктор',`/edit/${quiz.id}`)}</div>`:''}</section></main>`);
   if (state.startSelection) syncQuestionRange();
 }
 
+function rangeRows() {
+  const r=state.startSelection;
+  return r.ranges.map((range,i)=>`<div class="participant-range-row" data-range-row="${i}"><div class="between"><b>Диапазон ${i+1}</b>${r.ranges.length>1?btn('Удалить','remove-range','link',`data-index="${i}" aria-label="Удалить диапазон ${i+1}"`):''}</div><div class="range-slider"><div class="range-track"><div class="range-fill"></div></div>${['from','to'].map(bound=>`<input type="range" data-range-bound="${bound}" min="1" max="${r.total}" step="1" value="${range[bound]}" aria-label="${bound==='from'?'Первый':'Последний'} вопрос диапазона ${i+1}" ${r.total===1?'disabled':''}>`).join('')}</div><div class="range-fields"><label class="field">От<input class="input" type="number" inputmode="numeric" data-range-bound="from" min="1" max="${r.total}" step="1" value="${range.from}" required></label><span class="muted">—</span><label class="field">До включительно<input class="input" type="number" inputmode="numeric" data-range-bound="to" min="1" max="${r.total}" step="1" value="${range.to}" required></label></div></div>`).join('');
+}
 function questionRangeControls() {
   const r=state.startSelection;
-  return `<section class="question-range" aria-labelledby="range-title"><div class="row wrap mb"><label class="check"><input type="radio" name="participant-mode" value="range" checked>Диапазон</label><label class="check"><input type="radio" name="participant-mode" value="random">Случайные вопросы</label></div><div id="participant-range"><div class="between wrap"><h2 id="range-title">Какие вопросы пройти?</h2>${btn('Все вопросы','range-all','compact')}</div><p class="muted small">Номера соответствуют порядку вопросов в конструкторе. Выбранный диапазон перемешается при прохождении.</p><div class="range-slider"><div class="range-track"><div class="range-fill"></div></div><input type="range" data-range-bound="from" min="1" max="${r.total}" step="1" value="${r.from}" aria-label="Первый вопрос диапазона" ${r.total===1?'disabled':''}><input type="range" data-range-bound="to" min="1" max="${r.total}" step="1" value="${r.to}" aria-label="Последний вопрос диапазона" ${r.total===1?'disabled':''}></div><div class="range-fields"><label class="field">От<input class="input" type="number" data-range-bound="from" min="1" max="${r.total}" step="1" value="${r.from}" required></label><span class="muted">—</span><label class="field">До включительно<input class="input" type="number" data-range-bound="to" min="1" max="${r.total}" step="1" value="${r.to}" required></label></div></div><div id="participant-random" hidden><label class="field" for="participant-count">Сколько вопросов выбрать из ${r.total}?</label><input type="range" data-participant-count min="1" max="${r.total}" value="${r.count}" aria-label="Количество случайных вопросов"><input class="input" id="participant-count" type="number" data-participant-count min="1" max="${r.total}" step="1" value="${r.count}" required></div><div id="range-error" class="bad-text small" role="status"></div></section>`;
+  return `<section class="question-range" aria-label="Выбор вопросов"><div class="row wrap mb"><label class="check"><input type="radio" name="participant-mode" value="range" checked>Диапазоны</label><label class="check"><input type="radio" name="participant-mode" value="random">Случайные вопросы</label></div><div id="participant-range"><div class="between wrap"><h2>Какие вопросы пройти?</h2>${btn('Все вопросы','range-all','compact')}</div><p class="muted small">Номера соответствуют порядку в конструкторе. Пересекающиеся диапазоны не повторяют вопросы.</p><div id="participant-ranges">${rangeRows()}</div>${btn('＋ Добавить диапазон','add-range','full mt-sm')}</div><div id="participant-random" hidden><label class="field" for="participant-count">Сколько вопросов выбрать из ${r.total}?</label><input type="range" data-participant-count min="1" max="${r.total}" value="${r.count}" aria-label="Количество случайных вопросов"><input class="input" id="participant-count" type="number" inputmode="numeric" data-participant-count min="1" max="${r.total}" step="1" value="${r.count}" required></div><div id="range-error" class="bad-text small" role="status"></div></section>`;
+}
+function renderRanges(){document.querySelector('#participant-ranges').innerHTML=rangeRows();syncQuestionRange();}
+function rangeError(message) {
+  document.querySelector('#range-error').textContent=message;
+  document.querySelector('#start-attempt').disabled=!!message;
 }
 function syncQuestionRange(activeInput=null) {
   const r=state.startSelection;
@@ -193,36 +205,48 @@ function syncQuestionRange(activeInput=null) {
     for(const input of document.querySelectorAll('[data-participant-count]'))if(input!==activeInput)input.value=r.count;
     document.querySelector('#start-question-count').textContent=`${r.count} вопросов`;
     document.querySelector('#start-question-note').textContent=`случайно из ${r.total}`;
-    document.querySelector('#range-error').textContent='';document.querySelector('#start-attempt').disabled=false;return;
+    rangeError('');return;
   }
-  for (const input of document.querySelectorAll('[data-range-bound]')) {
-    const bound=input.dataset.rangeBound;
-    if (input!==activeInput) input.value=r[bound];
-    if (input.type==='number') {input.min=bound==='to'?r.from:1;input.max=bound==='from'?r.to:r.total;}
-    else input.setAttribute('aria-valuetext',`Вопрос №${r[bound]}`);
+  for(const row of document.querySelectorAll('[data-range-row]')){
+    const range=r.ranges[Number(row.dataset.rangeRow)];
+    for(const input of row.querySelectorAll('[data-range-bound]')){
+      if(input!==activeInput)input.value=range[input.dataset.rangeBound];
+      if(input.type==='range')input.setAttribute('aria-valuetext',`Вопрос №${range[input.dataset.rangeBound]}`);
+    }
+    const slider=row.querySelector('.range-slider');
+    slider.style.setProperty('--range-start',`${(range.from-1)/Math.max(1,r.total-1)*100}%`);
+    slider.style.setProperty('--range-end',`${(range.to-1)/Math.max(1,r.total-1)*100}%`);
   }
-  const slider=document.querySelector('.range-slider');
-  slider.style.setProperty('--range-start',`${(r.from-1)/Math.max(1,r.total-1)*100}%`);
-  slider.style.setProperty('--range-end',`${(r.to-1)/Math.max(1,r.total-1)*100}%`);
-  document.querySelector('#start-question-count').textContent=`${r.to-r.from+1} вопросов`;
-  document.querySelector('#start-question-note').textContent=`№${r.from}–${r.to} из ${r.total}`;
-  document.querySelector('#range-error').textContent='';
-  document.querySelector('#start-attempt').disabled=false;
+  const normalized=normalizeQuestionRange(r.total,{ranges:r.ranges}),ranges=normalized.ranges??[normalized];
+  document.querySelector('#start-question-count').textContent=`${ranges.reduce((n,r)=>n+r.to-r.from+1,0)} вопросов`;
+  document.querySelector('#start-question-note').textContent=`№${ranges.map(r=>r.from===r.to?r.from:`${r.from}–${r.to}`).join(', ')} из ${r.total}`;
+  rangeError('');
 }
 function updateQuestionRange(input,commit=false) {
   const r=state.startSelection;if(!r)return;
-  const bound=input.dataset.rangeBound,min=bound==='to'?r.from:1,max=bound==='from'?r.to:r.total;
+  const row=input.closest('[data-range-row]');if(!row||!input.isConnected)return;
+  const range=r.ranges[Number(row.dataset.rangeRow)],bound=input.dataset.rangeBound;if(!range)return;
   let value=input.valueAsNumber;
-  if(commit||input.type==='range') {
-    value=Number.isFinite(value)?Math.max(min,Math.min(max,Math.trunc(value))):r[bound];
-  } else if(!Number.isInteger(value)||value<min||value>max) {
-    document.querySelector('#range-error').textContent=`Введите целое число от ${min} до ${max}.`;
-    document.querySelector('#start-attempt').disabled=true;return;
+  if(commit||input.type==='range')value=Number.isFinite(value)?Math.max(1,Math.min(r.total,Math.trunc(value))):range[bound];
+  else if(!Number.isInteger(value)||value<1||value>r.total){rangeError(`Введите целое число от 1 до ${r.total}.`);return;}
+  if(bound==='from'&&value>range.to||bound==='to'&&value<range.from){
+    if(!commit&&input.type!=='range'){rangeError('Начало диапазона должно быть не больше конца.');return;}
+    if(bound==='from')range.to=value;else range.from=value;
   }
-  r[bound]=value;syncQuestionRange(commit||input.type==='range'?null:input);
+  range[bound]=value;syncQuestionRange(commit||input.type==='range'?null:input);
 }
-function selectionQuery(r){return !r?'':r.mode==='random'?`?mode=random&count=${r.count}`:`?from=${r.from}&to=${r.to}`;}
-function rangeLabel(result) {if(result.questionRange?.mode==='random')return `Случайные ${result.questionRange.count} из ${result.questionRange.poolSize??result.quiz?.questions.length??''}`;return result.questionRange?`Вопросы №${result.questionRange.from}–${result.questionRange.to} из ${result.questionRange.poolSize}`:'';}
+function selectionQuery(r){
+  if(!r)return '';
+  if(r.mode==='random')return `?mode=random&count=${r.count}`;
+  if(r.ranges)return `?ranges=${r.ranges.map(r=>`${r.from}-${r.to}`).join(',')}`;
+  return `?from=${r.from}&to=${r.to}`;
+}
+function rangeLabel(result) {
+  const r=result.questionRange;if(!r)return '';
+  const total=r.poolSize??result.quiz?.questions.length??'';
+  if(r.mode==='random')return `Случайные ${r.count} из ${total}`;
+  return `Вопросы №${(r.ranges??[r]).map(r=>r.from===r.to?r.from:`${r.from}–${r.to}`).join(', ')} из ${total}`;
+}
 function unavailable(title,text) {setContent(`<main id="main" class="page narrow">${empty(h(title),h(text),routeLink('Все тесты','/catalog','primary'))}</main>`);}
 
 function closeRestartMenu() {
@@ -238,7 +262,9 @@ function playPage() {
   const a=state.attempt;
   if (!a) return;
   const q=a.questions[a.index], selected=a.answers[a.index], answered=selected!==undefined, correct=selected===q.correctOptionId;
-  setContent(`<main id="main" class="quiz-page"><div class="player-tools">${btn(playerPrefs.side==='left'?'Кнопка: слева':'Кнопка: справа','player-side','compact',`aria-label="Положение кнопки перехода: ${playerPrefs.side==='left'?'слева':'справа'}"`)}<div class="restart-control">${btn('Начать заново','restart-attempt','primary compact','aria-expanded="false" aria-controls="restart-menu"')}<div id="restart-menu" class="restart-menu card" hidden aria-label="Начать заново">${btn('С выбранными вопросами','restart-same','full')}${btn('С новыми вопросами','restart-new','full')}</div></div></div>${a.saveError?notice(h(a.saveError)+' Прогресс пока не сохранён.','error'):''}${a.preview?notice('Предпросмотр · без записи в историю','warning'):''}${a.blocked?notice(`${h(a.blocked)} ${btn('Проверить соединение','retry-status','compact')}`,'error'):''}<div class="quiz-top mt-sm"><div><div class="eyebrow">${h(a.quiz.title)}</div><h1>Вопрос ${a.index+1} из ${a.questions.length}</h1>${a.questionRange?`<span class="muted small">№${q.originalIndex} в общем списке · ${h(rangeLabel(a))}</span>`:''}</div><span class="pill">◷ <span id="elapsed">${formatDuration(elapsedAttempt(a))}</span></span></div><progress class="progress" max="${a.questions.length}" value="${a.index}" aria-label="Прогресс"></progress><section class="card quiz-card"><h2>${h(q.text)}</h2>${q.options.map((o,i)=>`<button class="answer ${answered&&o.id===q.correctOptionId?'good':''} ${answered&&o.id===selected&&!correct?'bad':''}" data-action="answer" data-id="${h(o.id)}" ${answered||a.checking||a.blocked?'disabled':''}><span class="letter">${i<26?String.fromCharCode(65+i):i+1}</span><span class="answer-text">${h(o.text)}</span>${answered&&o.id===q.correctOptionId?'<span class="answer-tag">✓ Правильный ответ</span>':''}${answered&&o.id===selected&&!correct?'<span class="answer-tag">✕ Ваш ответ</span>':''}</button>`).join('')}<div class="feedback ${playerPrefs.side==='left'?'feedback-left':''}" aria-live="polite">${answered?(correct?'<span class="good-text">✓ Верно</span>':`<span class="bad-text">Неверно</span>${btn(a.index===a.questions.length-1?'Посмотреть результат':'Следующий вопрос →','next-question','primary large')}`):`<span class="muted small">${a.checking?'Проверяем доступность теста…':''}</span>`}</div></section></main>`,'catalog',true);
+  const previousCard=document.querySelector('.quiz-card'),scroll=previousCard?.dataset.questionId===q.id?{x:window.scrollX,y:window.scrollY}:null;
+  setContent(`<main id="main" class="quiz-page">${a.saveError?notice(h(a.saveError)+' Прогресс пока не сохранён.','error'):''}${a.preview?notice('Предпросмотр · без записи в историю','warning'):''}${a.blocked?notice(`${h(a.blocked)} ${btn('Проверить соединение','retry-status','compact')}`,'error'):''}<div class="quiz-top mt-sm"><div><div class="eyebrow">${h(a.quiz.title)}</div><h1>Вопрос ${a.index+1} из ${a.questions.length}</h1>${a.questionRange?`<span class="muted small">№${q.originalIndex} в общем списке · ${h(rangeLabel(a))}</span>`:''}</div><span class="pill">◷ <span id="elapsed">${formatDuration(elapsedAttempt(a))}</span></span></div><progress class="progress" max="${a.questions.length}" value="${a.index}" aria-label="Прогресс"></progress><section class="card quiz-card" data-question-id="${h(q.id)}"><h2>${h(q.text)}</h2>${q.options.map((o,i)=>`<button class="answer ${answered&&o.id===q.correctOptionId?'good':''} ${answered&&o.id===selected&&!correct?'bad':''}" data-action="answer" data-id="${h(o.id)}" ${answered||a.checking||a.blocked?'disabled':''}><span class="letter">${i<26?String.fromCharCode(65+i):i+1}</span><span class="answer-text">${h(o.text)}</span>${answered&&o.id===q.correctOptionId?'<span class="answer-tag">✓ Правильный ответ</span>':''}${answered&&o.id===selected&&!correct?'<span class="answer-tag">✕ Ваш ответ</span>':''}</button>`).join('')}<div class="feedback ${playerPrefs.side==='left'?'feedback-left':''}" aria-live="polite">${answered?(correct?'<span class="good-text">✓ Верно</span>':`<span class="bad-text">Неверно</span>${btn(a.index===a.questions.length-1?'Посмотреть результат':'Следующий вопрос →','next-question','primary large')}`):`<span class="muted small">${a.checking?'Проверяем доступность теста…':''}</span>`}</div></section><div class="player-tools">${btn(playerPrefs.side==='left'?'Кнопка: слева':'Кнопка: справа','player-side','compact',`aria-label="Положение кнопки перехода: ${playerPrefs.side==='left'?'слева':'справа'}"`)}<div class="restart-control">${btn('Начать заново','restart-attempt','primary compact','aria-expanded="false" aria-controls="restart-menu"')}<div id="restart-menu" class="restart-menu card" hidden aria-label="Начать заново">${btn('С выбранными вопросами','restart-same','full')}${btn('С новыми вопросами','restart-new','full')}</div></div></div></main>`,'catalog',true);
+  if(scroll)window.scrollTo(scroll.x,scroll.y);
 }
 
 function reviewCards(result) {
@@ -481,7 +507,9 @@ async function checkAccess(a,force=false) {
 }
 async function chooseAnswer(optionId) {
   const a=state.attempt;if(!a||a.done||a.checking||a.blocked||a.answers[a.index]!==undefined)return;
-  a.checking=true;playPage();
+  a.checking=true;
+  document.querySelectorAll('.answer').forEach(button=>button.disabled=true);
+  document.querySelector('.quiz-card')?.setAttribute('aria-busy','true');
   try {
     if(!(await checkAccess(a,a.index===a.questions.length-1)))return;
     const q=a.questions[a.index];if(!q.options.some(o=>o.id===optionId))return;
@@ -551,7 +579,7 @@ async function route() {
       else{state.catalog=await loadPublicCatalog();quiz=findQuiz(id);}
       if(version!==routeVersion)return;
       if(!quiz||quiz.status==='closed'&&section!=='run-preview'){await discardProgress(id,section==='run-preview');await startPage(quiz);return;}
-      await beginAttempt(quiz,section==='run-preview',{mode:params.get('mode'),count:params.get('count'),from:params.get('from'),to:params.get('to')});
+      await beginAttempt(quiz,section==='run-preview',params.has('ranges')?{ranges:params.get('ranges').split(',').map(part=>{const [from,to]=part.split('-');return {from,to};})}:{mode:params.get('mode'),count:params.get('count'),from:params.get('from'),to:params.get('to')});
     }
     if(version===routeVersion)playPage();
   }
@@ -689,7 +717,13 @@ async function handleAction(action,element,event={}) {
   if(action==='duplicate'){
     await flushDraft();const q=newQuiz();q.title=(state.editor.title||'Без названия')+' — копия';q.description=state.editor.description;q.icon=normalizeIcon(state.editor.icon);q.settings=clone(state.editor.settings);q.questions=state.editor.questions.map(copyQuestion);await storeDraft(q);location.hash=link(`/edit/${q.id}`);return;
   }
-  if(action==='range-all'){state.startSelection.from=1;state.startSelection.to=state.startSelection.total;syncQuestionRange();return;}
+  if(action==='range-all'){document.activeElement?.blur();state.startSelection.ranges=[{from:1,to:state.startSelection.total}];renderRanges();return;}
+  if(action==='add-range'){
+    const r=state.startSelection,from=r.ranges.at(-1).to<r.total?r.ranges.at(-1).to+1:1;
+    r.ranges.push({from,to:Math.min(r.total,from+29)});renderRanges();
+    document.querySelector('[data-range-row]:last-child input[type=number]').focus();return;
+  }
+  if(action==='remove-range'){document.activeElement?.blur();if(state.startSelection.ranges.length>1)state.startSelection.ranges.splice(Number(element.dataset.index),1);renderRanges();return;}
   if(action==='start-test'||action==='start-preview'){
     if(state.savedAttempt){if(!(await ask('Начать заново?','Прогресс этой незавершённой попытки будет удалён.','Начать заново')))return;await discardProgress(id,action==='start-preview');state.savedAttempt=null;}
     const r=state.startSelection?.id===id?state.startSelection:null;
@@ -709,6 +743,21 @@ document.addEventListener('click',event=>{
   if(event.target.closest('.skip-link')){event.preventDefault();const main=document.querySelector('#main');main?.setAttribute('tabindex','-1');main?.focus();main?.scrollIntoView();return;}
   const el=event.target.closest('[data-action]');if(!el||el.disabled)return;
   event.preventDefault();handleAction(el.dataset.action,el,event).catch(reportError);
+});
+const quickNumberSelector='input[type=number][data-range-bound],input[type=number][data-participant-count],input[type=number][data-bulk-bound],input[name=question-count-number]';
+document.addEventListener('focusin',event=>{const el=event.target;if(el.matches(quickNumberSelector)){el.dataset.previousValue=el.value;el.value='';}});
+document.addEventListener('focusout',event=>{
+  const el=event.target;if(!el.matches(quickNumberSelector))return;
+  if(el.value===''){el.value=el.dataset.previousValue??el.placeholder;}
+  if(el.dataset.rangeBound)updateQuestionRange(el,true);
+  else if(el.name==='question-count-number'&&state.editor&&!mobileView()){
+    const count=Math.max(1,Math.min(Math.max(1,state.editor.questions.length-1),Math.trunc(el.valueAsNumber)||state.editor.settings.questionCount));
+    el.value=count;if(state.editor.settings.questionCount!==count){state.editor.settings.questionCount=count;markDirty();}
+    const slider=document.querySelector('[name=question-count-range]');if(slider)slider.value=count;
+  }
+  else if(el.hasAttribute('data-participant-count')){
+    const r=state.startSelection;r.count=Math.max(1,Math.min(r.total,Math.trunc(el.valueAsNumber)||r.count));syncQuestionRange();
+  }
 });
 document.addEventListener('input',event=>{
   const el=event.target;
@@ -737,6 +786,7 @@ document.addEventListener('input',event=>{
     state.editor.settings.questionCount=el.value==='all'?null:Math.max(1,state.editor.questions.length-1);state.editor.settings.allowQuestionRange=el.value==='all';markDirty();editorPage();return;
   }
   else if(el.name==='question-count-range'||el.name==='question-count-number'){
+    if(el.value==='')return;
     const count=Math.max(1,Math.min(Math.max(1,state.editor.questions.length-1),Number(el.value)||1));state.editor.settings.questionCount=count;
     document.querySelectorAll('[name^=question-count-]').forEach(input=>{if(input!==el)input.value=count;});
   }

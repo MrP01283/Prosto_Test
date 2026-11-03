@@ -1,0 +1,30 @@
+/* Keep long question previews inside their column, with vertical scrolling only. */
+.editor-layout > *, .editor-top > div:first-child { min-width: 0; }
+.editor-top > div:first-child { flex: 1; }
+.editor-top .editor-title { max-width: 100%; }
+.editor-list .question-list, .mobile-question-list .question-list {
+  grid-template-columns: minmax(0, 1fr);
+  grid-auto-rows: 64px;
+  align-content: start;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+}
+.question-list .q-row { min-width: 0; width: 100%; height: 64px; }
+.question-list .q-item {
+  min-width: 0;
+  width: 100%;
+  height: 64px;
+  align-items: center;
+}
+.question-list .q-item b { min-width: 3ch; text-align: center; }
+.question-list .q-item span { min-width: 0; overflow-wrap: anywhere; }
+.editor-main .option-row textarea { min-width: 0; flex: 1; }
+.editor-main > .between > .row { flex-wrap: wrap; justify-content: flex-end; }
+.editor-settings { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.mobile-question-list summary { min-height: 44px; padding-block: 10px; }
+.mobile-reader .mobile-question .between { flex-wrap: wrap; }
+.mobile-reader .mobile-question .review-option .pre { overflow-wrap: anywhere; }
+@media(min-width: 1101px) {
+  .editor-settings { display: block; }
+}

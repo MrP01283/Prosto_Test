@@ -1,0 +1,31 @@
+/* Direct touch targets and short visual feedback; no layout-changing animations. */
+button,a,input,textarea,select{touch-action:manipulation}
+.button,.icon-btn,.tabs button,.q-item,.icon-choice,.answer{transition:background-color .14s,border-color .14s,box-shadow .14s,opacity .14s}
+.button:not(:disabled):active,.icon-btn:not(:disabled):active{box-shadow:inset 0 0 0 2px color-mix(in srgb,var(--accent) 22%,transparent)}
+.range-slider{touch-action:pan-y;cursor:ew-resize;user-select:none;-webkit-user-select:none}
+.range-slider input[type=range]::-webkit-slider-thumb{pointer-events:none;width:28px;height:28px;margin-top:-12px}
+.range-slider input[type=range]::-moz-range-thumb{pointer-events:none;width:22px;height:22px}
+.range-slider input[type=range]:focus-visible::-webkit-slider-thumb{box-shadow:0 0 0 4px var(--tint),0 0 0 6px var(--accent)}
+.range-slider.is-dragging .range-fill{transition:none}
+.range-slider .range-fill{transition:left .1s,right .1s}
+.question-range .check{min-height:44px;align-items:center;cursor:pointer;padding:7px 0}
+.question-range .check input{margin-top:0}
+#participant-random>input[type=range]{display:block;width:100%;height:44px;margin:10px 0;cursor:ew-resize}
+.motion-enter{animation:enter-content .2s ease-out both}
+.motion-feedback{animation:feedback-in .2s ease-out both}
+.motion-answer{animation:answer-highlight .24s ease-out both}
+dialog[open]{animation:enter-dialog .18s ease-out both}
+dialog[open]::backdrop{animation:fade-in .18s ease-out both}
+.restart-menu:not([hidden]){transform-origin:top right;animation:enter-menu .15s ease-out both}
+#toast:not(:empty){animation:toast-in .18s ease-out both}
+progress::-webkit-progress-value{transition:width .18s ease-out}
+@media(hover:hover) and (pointer:fine){.test-card{transition:transform .18s,box-shadow .18s}.test-card:hover{transform:translateY(-3px);box-shadow:0 15px 32px #283c5d16}}
+@media(pointer:coarse){.button.compact{min-height:44px}.range-slider{height:48px}.range-slider input[type=range]{height:48px}.range-track{top:22px}.question-range .row{gap:8px 18px}}
+@keyframes enter-content{from{opacity:.45;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
+@keyframes feedback-in{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:translateY(0)}}
+@keyframes answer-highlight{from{box-shadow:inset 0 0 0 2px currentColor}to{box-shadow:inset 0 0 0 0 transparent}}
+@keyframes enter-dialog{from{opacity:0;transform:translateY(7px) scale(.985)}to{opacity:1;transform:translateY(0) scale(1)}}
+@keyframes enter-menu{from{opacity:0;transform:translateY(-3px) scale(.98)}to{opacity:1;transform:translateY(0) scale(1)}}
+@keyframes toast-in{from{opacity:0;translate:0 8px}to{opacity:1;translate:0 0}}
+@keyframes fade-in{from{opacity:0}to{opacity:1}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}.test-card:hover{transform:none}}
