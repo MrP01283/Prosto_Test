@@ -47,7 +47,7 @@ function animateContent(){
   const question=main.querySelector('.quiz-card h2,.editor-main h2,.mobile-question h2');
   const screen=`${location.hash}|${question?.textContent??main.querySelector('h1')?.textContent??''}`;
   if(screen!==previousScreen){
-    (main.querySelector('.quiz-card,.editor-main,.mobile-question')??main).classList.add('motion-enter');
+    if(!main.querySelector('.editor-main,.mobile-question'))(main.querySelector('.quiz-card')??main).classList.add('motion-enter');
     previousScreen=screen;previousAnswer='';
   }
   const answers=[...main.querySelectorAll('.answer.good,.answer.bad')];
