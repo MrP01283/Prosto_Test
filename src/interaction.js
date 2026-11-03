@@ -58,8 +58,3 @@ function animateContent(){
   }
 }
 if(app){app.addEventListener('quiz-rendered',animateContent);new MutationObserver(animateContent).observe(app,{childList:true});animateContent();}
-
-// Pause the decorative header as soon as this tab is hidden.
-function pauseHeaderPattern(){document.documentElement.classList.toggle('page-hidden',document.hidden);}
-document.addEventListener('visibilitychange',pauseHeaderPattern);
-pauseHeaderPattern();
