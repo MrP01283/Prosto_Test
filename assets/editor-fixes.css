@@ -28,3 +28,5 @@
 @media(min-width: 1101px) {
   .editor-settings { display: block; }
 }
+
+.editor-question-nav{display:flex;justify-content:space-between;gap:12px;margin-top:20px}.editor-question-nav .button{flex:1;min-width:0}
