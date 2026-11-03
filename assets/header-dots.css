@@ -1,0 +1,12 @@
+/* Three static dot textures; only transform and opacity change per frame. */
+.header{position:relative;isolation:isolate}
+.header-pattern{position:absolute;inset:0;z-index:-1;overflow:hidden;pointer-events:none;contain:strict;opacity:.24}
+[data-theme=dark] .header-pattern{opacity:.42}
+.header-pattern-layer{position:absolute;top:-8%;height:116%;background-image:url('./header-dots.svg');background-size:480px 128px;background-repeat:repeat;will-change:transform,opacity;animation:header-dot-breathe 16s ease-in-out infinite alternate;transform-origin:center}
+.header-pattern-layer:nth-child(1){left:-3%;width:39%;background-position:left center;animation-delay:-4s;transform-origin:left center}
+.header-pattern-layer:nth-child(2){left:35%;width:32%;background-size:640px 171px;background-position:center;animation-duration:20s;animation-delay:-12s}
+.header-pattern-layer:nth-child(3){right:-3%;width:39%;background-position:right center;animation-duration:18s;animation-delay:-9s;transform-origin:right center}
+@keyframes header-dot-breathe{from{transform:scale(.97);opacity:.4}to{transform:scale(1.07);opacity:.9}}
+.page-hidden .header-pattern-layer{animation-play-state:paused}
+@media(max-width:760px){.header-pattern-layer{background-size:360px 96px}.header-pattern-layer:nth-child(2){background-size:440px 117px}}
+@media(prefers-reduced-motion:reduce){.header-pattern-layer{animation:none;transform:none;opacity:.55;will-change:auto}}
