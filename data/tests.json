@@ -32475,15 +32475,15 @@
         }
       ],
       "settings": {
-        "questionCount": null,
-        "allowQuestionRange": true,
+        "questionCount": 40,
+        "allowQuestionRange": false,
         "shuffleQuestions": true,
         "shuffleOptions": true
       },
       "status": "published",
       "createdAt": "2026-11-01T08:28:01.546Z",
-      "updatedAt": "2026-11-01T09:32:12.654Z",
-      "revision": "62f8bded-16eb-406e-9d04-15442a29dfc5"
+      "updatedAt": "2026-11-03T04:04:55.260Z",
+      "revision": "ccdc7430-5a6f-461d-a447-63e70e252e4a"
     }
   ]
 }
