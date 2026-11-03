@@ -1,3 +1,4 @@
+import { publicStatus } from '../src/public-status.js';
 import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { resolve, extname, sep } from 'node:path';
@@ -7,6 +8,10 @@ const types={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=
 createServer(async(req,res)=>{
   try{
     const url=new URL(req.url,'http://localhost');
+    if(url.pathname==='/data/status.json'){
+      const catalog=JSON.parse(await readFile(resolve(root,'data/tests.json'),'utf8'));
+      res.writeHead(200,{'Content-Type':types['.json'],'Cache-Control':'no-store'}).end(JSON.stringify(publicStatus(catalog)));return;
+    }
     let file=resolve(root,'.'+decodeURIComponent(url.pathname));
     if(file!==root&&!file.startsWith(root+sep)){res.writeHead(403).end();return;}
     if(url.pathname.split('/').some(part=>part==='.git'||part==='.env'||part==='.local')){res.writeHead(403).end();return;}

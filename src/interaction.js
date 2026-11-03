@@ -57,4 +57,4 @@ function animateContent(){
     main.querySelector('.feedback')?.classList.add('motion-feedback');previousAnswer=answerKey;
   }
 }
-if(app){new MutationObserver(animateContent).observe(app,{childList:true});animateContent();}
+if(app){app.addEventListener('quiz-rendered',animateContent);new MutationObserver(animateContent).observe(app,{childList:true});animateContent();}

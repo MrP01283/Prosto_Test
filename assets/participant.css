@@ -12,3 +12,6 @@
 .start-summary{display:flex;flex-direction:column;align-items:center;gap:8px;margin:26px 0;padding:24px 18px;background:var(--tint);border:1px solid var(--line);border-radius:14px}
 .start-summary #start-question-count{font-size:clamp(30px,5vw,44px);font-weight:800;line-height:1.2;color:var(--accent);font-variant-numeric:tabular-nums}
 .start-summary #start-question-note{font-size:14px;line-height:1.5;color:var(--muted);max-width:100%}
+
+/* Keep the complete review searchable while laying out off-screen cards on demand. */
+.review-card{content-visibility:auto;contain-intrinsic-size:auto 480px}

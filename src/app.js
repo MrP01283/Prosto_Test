@@ -2,9 +2,9 @@ import './interaction.js';
 import { rangeIds, moveSelectedQuestions, selectedNumbers } from './question-selection.js';
 import { CONFIG } from './config.js';
 import { uid, clone, shuffle, escapeHTML as h, normalize, newQuiz, newQuestion, questionErrors, quizErrors, parseQuestionBlock, parseQuestionBatch, copyQuestion, mergeQuestions, prepareQuestions, allowsQuestionRange, normalizeQuestionRange, makeResult, publishedQuiz, draftFromPublic, formatDuration } from './core.js';
-import { activeAttemptKey, elapsedAttempt, pauseAttempt, snapshotAttempt, validAttemptSnapshot } from './attempt-progress.js';
-import { db, completeAttempt, requestPersistentStorage } from './storage.js';
-import { GitHub, loadPublicCatalog } from './github.js';
+import { activeAttemptKey, elapsedAttempt, pauseAttempt, snapshotAttempt, snapshotProgress, validAttemptSnapshot } from './attempt-progress.js';
+import { db, openDB, putActiveProgress, completeAttempt, requestPersistentStorage } from './storage.js';
+import { GitHub, loadPublicCatalog, loadPublicStatus } from './github.js';
 import { iconHTML, normalizeIcon } from './icons.js';
 import { openIconEditor } from './icon-editor.js';
 import { hasRememberedToken, hasVaultSession, rememberToken, restoreToken, forgetToken } from './token-vault.js';
@@ -312,13 +312,53 @@ function closeRestartMenu() {
 }
 document.addEventListener('keydown',event=>{if(event.key==='Escape'&&restartMenuAttempt){closeRestartMenu();document.querySelector('[data-action=restart-attempt]')?.focus();}});
 
+function playerFeedbackHTML(a) {
+  const q=a.questions[a.index],selected=a.answers[a.index],answered=selected!==undefined,correct=selected===q.correctOptionId;
+  return `${answered?(correct?'<span class="good-text">✓ Верно</span>':`<span class="bad-text">Неверно</span>${btn(a.index===a.questions.length-1?'Посмотреть результат':'Следующий вопрос →','next-question','primary large')}`):`<span class="muted small">${a.checking?'Проверяем доступность теста…':''}</span>`}`;
+}
+function playerQuestionHTML(a) {
+  const q=a.questions[a.index],selected=a.answers[a.index],answered=selected!==undefined,correct=selected===q.correctOptionId;
+  return `<h2>${h(q.text)}</h2>${q.options.map((o,i)=>`<button class="answer ${answered&&o.id===q.correctOptionId?'good':''} ${answered&&o.id===selected&&!correct?'bad':''}" data-action="answer" data-id="${h(o.id)}" ${answered||a.checking||a.blocked?'disabled':''}><span class="letter">${i<26?String.fromCharCode(65+i):i+1}</span><span class="answer-text">${h(o.text)}</span>${answered&&o.id===q.correctOptionId?'<span class="answer-tag">✓ Правильный ответ</span>':''}${answered&&o.id===selected&&!correct?'<span class="answer-tag">✕ Ваш ответ</span>':''}</button>`).join('')}<div class="feedback ${playerPrefs.side==='left'?'feedback-left':''}" aria-live="polite">${playerFeedbackHTML(a)}</div>`;
+}
+function playerHeadingHTML(a){const q=a.questions[a.index];return `<div><div class="eyebrow">${h(a.quiz.title)}</div><h1>Вопрос ${a.index+1} из ${a.questions.length}</h1>${a.questionRange?`<span class="muted small">№${q.originalIndex} в общем списке · ${h(rangeLabel(a))}</span>`:''}</div><span class="pill">◷ <span id="elapsed">${formatDuration(elapsedAttempt(a))}</span></span>`;}
+function playerNoticesHTML(a){return `${a.saveError?notice(h(a.saveError)+' Прогресс пока не сохранён.','error'):''}${a.preview?notice('Предпросмотр · без записи в историю','warning'):''}${a.blocked?notice(`${h(a.blocked)} ${btn('Проверить соединение','retry-status','compact')}`,'error'):''}`;}
+
 function playPage() {
   const a=state.attempt;
   if (!a) return;
   const q=a.questions[a.index], selected=a.answers[a.index], answered=selected!==undefined, correct=selected===q.correctOptionId;
-  const previousCard=document.querySelector('.quiz-card'),scroll=previousCard?.dataset.questionId===q.id?{x:window.scrollX,y:window.scrollY}:null;
-  setContent(`<main id="main" class="quiz-page">${a.saveError?notice(h(a.saveError)+' Прогресс пока не сохранён.','error'):''}${a.preview?notice('Предпросмотр · без записи в историю','warning'):''}${a.blocked?notice(`${h(a.blocked)} ${btn('Проверить соединение','retry-status','compact')}`,'error'):''}<div class="quiz-top mt-sm"><div><div class="eyebrow">${h(a.quiz.title)}</div><h1>Вопрос ${a.index+1} из ${a.questions.length}</h1>${a.questionRange?`<span class="muted small">№${q.originalIndex} в общем списке · ${h(rangeLabel(a))}</span>`:''}</div><span class="pill">◷ <span id="elapsed">${formatDuration(elapsedAttempt(a))}</span></span></div><progress class="progress" max="${a.questions.length}" value="${a.index}" aria-label="Прогресс"></progress><section class="card quiz-card" data-question-id="${h(q.id)}"><h2>${h(q.text)}</h2>${q.options.map((o,i)=>`<button class="answer ${answered&&o.id===q.correctOptionId?'good':''} ${answered&&o.id===selected&&!correct?'bad':''}" data-action="answer" data-id="${h(o.id)}" ${answered||a.checking||a.blocked?'disabled':''}><span class="letter">${i<26?String.fromCharCode(65+i):i+1}</span><span class="answer-text">${h(o.text)}</span>${answered&&o.id===q.correctOptionId?'<span class="answer-tag">✓ Правильный ответ</span>':''}${answered&&o.id===selected&&!correct?'<span class="answer-tag">✕ Ваш ответ</span>':''}</button>`).join('')}<div class="feedback ${playerPrefs.side==='left'?'feedback-left':''}" aria-live="polite">${answered?(correct?'<span class="good-text">✓ Верно</span>':`<span class="bad-text">Неверно</span>${btn(a.index===a.questions.length-1?'Посмотреть результат':'Следующий вопрос →','next-question','primary large')}`):`<span class="muted small">${a.checking?'Проверяем доступность теста…':''}</span>`}</div></section><div class="player-tools">${btn(playerPrefs.side==='left'?'Кнопка: слева':'Кнопка: справа','player-side','compact',`aria-label="Положение кнопки перехода: ${playerPrefs.side==='left'?'слева':'справа'}"`)}<div class="restart-control">${btn('Начать заново','restart-attempt','primary compact','aria-expanded="false" aria-controls="restart-menu"')}<div id="restart-menu" class="restart-menu card" hidden aria-label="Начать заново">${btn('С выбранными вопросами','restart-same','full')}${btn('С новыми вопросами','restart-new','full')}</div></div></div></main>`,'catalog',true);
-  if(scroll)window.scrollTo(scroll.x,scroll.y);
+  closeRestartMenu();
+  const existing=document.querySelector('.quiz-page');
+  if(existing?.dataset.attemptId===a.attemptId){
+    const card=existing.querySelector('.quiz-card'),sameQuestion=card.dataset.questionId===q.id;
+    const scroll=sameQuestion?{x:window.scrollX,y:window.scrollY}:null;
+    const notices=existing.querySelector('.player-notices'),noticeHTML=playerNoticesHTML(a);
+    if(notices.innerHTML!==noticeHTML)notices.innerHTML=noticeHTML;
+    if(sameQuestion){
+      card.removeAttribute('aria-busy');
+      for(const button of card.querySelectorAll('.answer')){
+        const good=answered&&button.dataset.id===q.correctOptionId,bad=answered&&button.dataset.id===selected&&!correct;
+        button.disabled=answered||a.checking||!!a.blocked;
+        button.classList.toggle('good',good);button.classList.toggle('bad',bad);
+        let tag=button.querySelector('.answer-tag');
+        if(good||bad){if(!tag){tag=document.createElement('span');tag.className='answer-tag';button.append(tag);}tag.textContent=good?'✓ Правильный ответ':'✕ Ваш ответ';}
+        else tag?.remove();
+      }
+      const feedback=card.querySelector('.feedback');feedback.classList.toggle('feedback-left',playerPrefs.side==='left');feedback.innerHTML=playerFeedbackHTML(a);
+    }else{
+      card.outerHTML=`<section class="card quiz-card" data-question-id="${h(q.id)}">${playerQuestionHTML(a)}</section>`;
+      existing.querySelector('.quiz-top').innerHTML=playerHeadingHTML(a);
+    }
+    existing.querySelector('.progress').value=a.index;
+    const side=existing.querySelector('[data-action=player-side]');
+    side.textContent=playerPrefs.side==='left'?'Кнопка: слева':'Кнопка: справа';
+    side.setAttribute('aria-label',`Положение кнопки перехода: ${playerPrefs.side==='left'?'слева':'справа'}`);
+    document.title=`Вопрос ${a.index+1} из ${a.questions.length} · Prosto Test`;
+    app.dispatchEvent(new Event('quiz-rendered'));
+    if(scroll)window.scrollTo(scroll.x,scroll.y);return;
+  }
+  setContent(`<main id="main" class="quiz-page" data-attempt-id="${h(a.attemptId)}"><div class="player-notices">${playerNoticesHTML(a)}</div><div class="quiz-top mt-sm">${playerHeadingHTML(a)}</div><progress class="progress" max="${a.questions.length}" value="${a.index}" aria-label="Прогресс"></progress><section class="card quiz-card" data-question-id="${h(q.id)}">${playerQuestionHTML(a)}</section><div class="player-tools">${btn(playerPrefs.side==='left'?'Кнопка: слева':'Кнопка: справа','player-side','compact',`aria-label="Положение кнопки перехода: ${playerPrefs.side==='left'?'слева':'справа'}"`)}<div class="restart-control">${btn('Начать заново','restart-attempt','primary compact','aria-expanded="false" aria-controls="restart-menu"')}<div id="restart-menu" class="restart-menu card" hidden aria-label="Начать заново">${btn('С выбранными вопросами','restart-same','full')}${btn('С новыми вопросами','restart-new','full')}</div></div></div></main>`,'catalog',true);
+
 }
 
 function reviewCards(result) {
@@ -528,8 +568,8 @@ async function readProgress(quizId,preview=false) {
 }
 function saveProgress(a=state.attempt) {
   if(!a||a.done)return progressQueue;
-  const saved=snapshotAttempt(a);
-  progressQueue=progressQueue.catch(()=>{}).then(()=>db.put('activeAttempts',saved)).then(()=>{a.saveError='';},error=>{const message=errorMessage(error);if(a.saveError!==message)toast(message+' Прогресс пока не сохранён.');a.saveError=message;});
+  const initial=!a.progressInitialized,saved=initial?snapshotAttempt(a):snapshotProgress(a);
+  progressQueue=progressQueue.catch(()=>{}).then(()=>initial?db.put('activeAttempts',saved):putActiveProgress(saved)).then(()=>{a.progressInitialized=true;a.saveError='';},error=>{const message=errorMessage(error);if(a.saveError!==message)toast(message+' Прогресс пока не сохранён.');a.saveError=message;});
   return progressQueue;
 }
 async function discardProgress(id,preview=false) {await progressQueue;await db.remove('activeAttempts',activeAttemptKey(id,preview));}
@@ -539,7 +579,7 @@ async function beginAttempt(quiz,preview=false,range=null,fresh=null) {
   stopAttempt();
   const questionRange=saved?.questionRange??(allowsQuestionRange(quiz)?normalizeQuestionRange(quiz.questions.length,range??{}):null);
   state.attempt={...(saved??{}),attemptId:saved?.attemptId??uid(),quiz:clone(saved?.quiz??quiz),questionRange,questions:fresh?.questions??saved?.questions??prepareQuestions(quiz,Math.random,questionRange),answers:saved?.answers??[],index:saved?.index??0,startedAt:saved?.startedAt??Date.now(),elapsedMs:saved?.elapsedMs??0,activeSince:document.hidden?null:performance.now(),lastCheck:Date.now(),preview,blocked:'',saveError:'',checking:false,done:false,timer:null,advance:null,poll:null};
-  const a=state.attempt;
+  const a=state.attempt;a.progressInitialized=!!saved;
   a.timer=setInterval(()=>{const elapsed=document.querySelector('#elapsed');if(elapsed)elapsed.textContent=formatDuration(elapsedAttempt(a));if(!document.hidden)saveProgress(a);},1000);
   if(!preview)a.poll=setInterval(()=>checkAccess(a).catch(error=>{if(state.attempt===a){a.blocked=errorMessage(error);playPage();}}),CONFIG.statusInterval);
   await saveProgress(a);
@@ -548,17 +588,22 @@ async function beginAttempt(quiz,preview=false,range=null,fresh=null) {
 function stopAttempt() {const a=state.attempt;if(a){clearInterval(a.timer);clearInterval(a.poll);clearTimeout(a.advance);}state.attempt=null;}
 async function checkAccess(a,force=false) {
   if(a.preview)return true;
+  if(a.accessPromise)return a.accessPromise;
   if(!force&&!a.blocked&&Date.now()-a.lastCheck<10000)return true;
-  const catalog=await loadPublicCatalog();
-  if(state.attempt!==a)return false;
-  state.catalog=catalog;
-  const quiz=catalog.tests.find(q=>q.id===a.quiz.id);
-  if(!quiz||quiz.status==='closed'){
-    a.done=true;await discardProgress(a.quiz.id,a.preview);stopAttempt();history.replaceState(null,'',link(`/test/${a.quiz.id}`));state.route=`/test/${a.quiz.id}`;
-    unavailable(quiz?'Тест закрыт':'Тест удалён','Создатель прекратил доступ. Текущая попытка остановлена и не записана в историю.');return false;
-  }
-  a.blocked='';a.lastCheck=Date.now();return true;
+  const request=(async()=>{
+    const catalog=await loadPublicStatus();
+    if(state.attempt!==a)return false;
+    const quiz=catalog.tests.find(q=>q.id===a.quiz.id);
+    if(!quiz||quiz.status==='closed'){
+      a.done=true;await discardProgress(a.quiz.id,a.preview);stopAttempt();history.replaceState(null,'',link(`/test/${a.quiz.id}`));state.route=`/test/${a.quiz.id}`;
+      unavailable(quiz?'Тест закрыт':'Тест удалён','Создатель прекратил доступ. Текущая попытка остановлена и не записана в историю.');return false;
+    }
+    a.blocked='';a.lastCheck=Date.now();return true;
+  })();
+  a.accessPromise=request;
+  try{return await request;}finally{if(a.accessPromise===request)a.accessPromise=null;}
 }
+
 async function chooseAnswer(optionId) {
   const a=state.attempt;if(!a||a.done||a.checking||a.blocked||a.answers[a.index]!==undefined)return;
   a.checking=true;
@@ -905,7 +950,7 @@ window.addEventListener('pagehide',()=>{if(state.attempt&&!state.attempt.done){p
 window.addEventListener('pageshow',event=>{if(event.persisted&&state.attempt&&!state.attempt.done)state.attempt.activeSince=performance.now();});
 mobileMedia.addEventListener('change',async()=>{if(isCreatorUnlocked()&&(state.route==='/admin'||state.route.startsWith('/edit/'))){closeDialog();await flushDraft().catch(reportError);if(state.editor)editorPage();else adminPage();}});
 
-const loaded=await Promise.allSettled([loadPublicCatalog(),db.all('attempts')]);
+const loaded=await Promise.allSettled([loadPublicCatalog(),openDB()]);
 if(loaded[0].status==='fulfilled')state.catalog=loaded[0].value;else state.publicError=errorMessage(loaded[0].reason);
-if(loaded[1].status==='fulfilled')state.attempts=loaded[1].value;else state.storageError=errorMessage(loaded[1].reason);
+if(loaded[1].status==='rejected')state.storageError=errorMessage(loaded[1].reason);
 route().catch(error=>unavailable('Не удалось открыть страницу',errorMessage(error)));

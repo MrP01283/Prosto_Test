@@ -1,3 +1,4 @@
+import { publicStatus, validatePublicStatus } from './public-status.js';
 import { CONFIG } from './config.js';
 import { validateCatalog, applyCatalogChange } from './core.js';
 
@@ -55,10 +56,20 @@ export class GitHub {
   }
 }
 
-export async function loadPublicCatalog() {
+export async function loadPublicCatalog(fetcher=globalThis.fetch.bind(globalThis)) {
   let response;
-  try { response = await fetch(new URL(`../data/tests.json?v=${Date.now()}`, import.meta.url), {cache:'no-store', signal:AbortSignal.timeout(15000)}); }
+  try { response = await fetcher(new URL(`../data/tests.json?v=${Date.now()}`, import.meta.url), {cache:'no-store', signal:AbortSignal.timeout(15000)}); }
   catch { throw new Error('Не удалось загрузить тесты. Проверьте интернет и повторите попытку.'); }
   if (!response.ok) throw new Error(`Каталог тестов недоступен (${response.status}). Попробуйте обновить страницу позже.`);
   return validateCatalog(await response.json());
+}
+
+export async function loadPublicStatus(fetcher=globalThis.fetch.bind(globalThis)) {
+  let response;
+  try{response=await fetcher(new URL(`../data/status.json?v=${Date.now()}`,import.meta.url),{cache:'no-store',signal:AbortSignal.timeout(15000)});}
+  catch{throw new Error('Не удалось проверить доступность теста. Проверьте интернет.');}
+  // Older/custom deployments may not have the generated small manifest yet.
+  if(response.status===404)return publicStatus(await loadPublicCatalog(fetcher));
+  if(!response.ok)throw new Error(`Не удалось проверить доступность теста (${response.status}).`);
+  return validatePublicStatus(await response.json());
 }
