@@ -774,7 +774,23 @@ document.addEventListener('click',event=>{
   event.preventDefault();handleAction(el.dataset.action,el,event).catch(reportError);
 });
 const quickNumberSelector='input[type=number][data-range-bound],input[type=number][data-participant-count],input[type=number][data-bulk-bound],input[name=question-count-number]';
-document.addEventListener('focusin',event=>{const el=event.target;if(el.matches(quickNumberSelector)){el.dataset.previousValue=el.value;el.value='';}});
+let numberStepperTarget=null;
+function restoreNumberForStep(el){if(el.value===''&&el.dataset.previousValue!==undefined)el.value=el.dataset.previousValue;}
+document.addEventListener('pointerdown',event=>{
+  numberStepperTarget=null;
+  const el=event.target;if(!el.matches(quickNumberSelector))return;
+  const box=el.getBoundingClientRect(),padding=parseFloat(getComputedStyle(el).paddingRight)||0;
+  if(event.clientX>=box.right-padding-20){numberStepperTarget=el;restoreNumberForStep(el);}
+},true);
+for(const event of ['pointerup','pointercancel'])document.addEventListener(event,()=>{numberStepperTarget=null;},true);
+document.addEventListener('keydown',event=>{
+  if(['ArrowUp','ArrowDown'].includes(event.key)&&event.target.matches(quickNumberSelector))restoreNumberForStep(event.target);
+});
+document.addEventListener('focusin',event=>{
+  const el=event.target;if(!el.matches(quickNumberSelector))return;
+  el.dataset.previousValue=el.value;
+  if(numberStepperTarget!==el)el.value='';
+});
 document.addEventListener('focusout',event=>{
   const el=event.target;if(!el.matches(quickNumberSelector))return;
   if(el.value===''){el.value=el.dataset.previousValue??el.placeholder;}
