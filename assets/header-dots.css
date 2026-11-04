@@ -12,3 +12,38 @@
   .header .brand img{width:32px;height:32px}
   .header-end{gap:6px}
 }
+
+/* The public header has two deliberate mobile rows: the brand, then navigation
+   beside its controls.  This avoids the accidental three-row flex wrap. */
+@media(max-width:760px){
+  .header:not(.quiz-header){
+    display:grid;
+    grid-template-columns:minmax(0,1fr) max-content;
+    grid-template-areas:
+      "brand brand"
+      "nav actions";
+    column-gap:10px;
+    row-gap:10px;
+    align-items:center;
+    padding-top:13px;
+    padding-bottom:11px;
+  }
+  .header:not(.quiz-header) .brand{grid-area:brand}
+  .header:not(.quiz-header) .nav{
+    grid-area:nav;
+    order:initial;
+    width:auto;
+    height:40px;
+    gap:18px;
+  }
+  .header:not(.quiz-header) .header-end{
+    grid-area:actions;
+    margin-left:0;
+    gap:7px;
+  }
+}
+
+@media(max-width:380px){
+  .header:not(.quiz-header) .nav{gap:14px}
+  .header:not(.quiz-header) .header-end .button{font-size:11px;padding-inline:8px}
+}
