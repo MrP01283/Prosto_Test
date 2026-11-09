@@ -1,6 +1,7 @@
 import { publicStatus, validatePublicStatus } from './public-status.js';
 import { CONFIG } from './config.js';
 import { validateCatalog, applyCatalogChange } from './core.js';
+import { PUBLIC_QUIZ_FILE, validatePublicIndex } from './public-catalog.js';
 
 export class GitHub {
   #token = '';
@@ -56,20 +57,63 @@ export class GitHub {
   }
 }
 
-export async function loadPublicCatalog(fetcher=globalThis.fetch.bind(globalThis)) {
-  let response;
-  try { response = await fetcher(new URL(`../data/tests.json?v=${Date.now()}`, import.meta.url), {cache:'no-store', signal:AbortSignal.timeout(15000)}); }
-  catch { throw new Error('Не удалось загрузить тесты. Проверьте интернет и повторите попытку.'); }
-  if (!response.ok) throw new Error(`Каталог тестов недоступен (${response.status}). Попробуйте обновить страницу позже.`);
-  return validateCatalog(await response.json());
+const browserFetch = (url, options) => globalThis.fetch(url, options);
+const transientHTTP = new Set([408, 500, 502, 503, 504]);
+
+async function readPublicJSON(path, label, fetcher, {
+  cache = 'no-cache', timeouts = [15000, 20000], allowMissing = false,
+} = {}) {
+  const url = new URL(`../data/${path}`, import.meta.url);
+  for (const [attempt, timeout] of timeouts.entries()) {
+    const last = attempt === timeouts.length - 1;
+    const signal = AbortSignal.timeout(timeout);
+    let response;
+    try {
+      response = await fetcher(url, {cache:attempt && cache === 'default' ? 'reload' : cache, signal});
+      if (response.ok) return await response.json();
+    } catch (error) {
+      if (signal.aborted || error?.name === 'TimeoutError') {
+        if (!last) continue;
+        throw new Error(`${label}. Загрузка заняла слишком много времени. Попробуйте ещё раз.`, {cause:error});
+      }
+      if (error instanceof SyntaxError) {
+        throw new Error(`${label}. Сервер вернул некорректные данные.`, {cause:error});
+      }
+      if (!last) continue;
+      throw new Error(`${label}. Проверьте интернет и повторите попытку.`, {cause:error});
+    }
+    if (allowMissing && response.status === 404) return undefined;
+    if (!last && transientHTTP.has(response.status)) continue;
+    throw new Error(`${label} (HTTP ${response.status}). Попробуйте ещё раз позже.`);
+  }
 }
 
-export async function loadPublicStatus(fetcher=globalThis.fetch.bind(globalThis)) {
-  let response;
-  try{response=await fetcher(new URL(`../data/status.json?v=${Date.now()}`,import.meta.url),{cache:'no-store',signal:AbortSignal.timeout(15000)});}
-  catch{throw new Error('Не удалось проверить доступность теста. Проверьте интернет.');}
+export async function loadPublicIndex(fetcher = browserFetch) {
+  return validatePublicIndex(await readPublicJSON(
+    'catalog.json', 'Не удалось загрузить список тестов', fetcher, {timeouts:[8000, 15000]},
+  ));
+}
+
+export async function loadPublicQuiz(entry, fetcher = browserFetch) {
+  if (!PUBLIC_QUIZ_FILE.test(entry.file)) throw new Error('Не удалось определить файл теста.');
+  const quiz = await readPublicJSON(entry.file, 'Не удалось загрузить вопросы', fetcher, {cache:'default'});
+  validateCatalog({schemaVersion:1, tests:[quiz]});
+  if (quiz.id !== entry.id || quiz.revision !== entry.revision || quiz.status !== entry.status ||
+      quiz.questions.length !== entry.questionTotal) {
+    throw new Error('Тест обновился во время загрузки. Нажмите «Повторить».');
+  }
+  return quiz;
+}
+
+export async function loadPublicCatalog(fetcher = browserFetch) {
+  return validateCatalog(await readPublicJSON('tests.json', 'Не удалось загрузить тесты', fetcher));
+}
+
+export async function loadPublicStatus(fetcher = browserFetch) {
+  const data = await readPublicJSON(
+    `status.json?v=${Date.now()}`, 'Не удалось проверить доступность теста', fetcher,
+    {cache:'no-store', timeouts:[5000, 8000], allowMissing:true},
+  );
   // Older/custom deployments may not have the generated small manifest yet.
-  if(response.status===404)return publicStatus(await loadPublicCatalog(fetcher));
-  if(!response.ok)throw new Error(`Не удалось проверить доступность теста (${response.status}).`);
-  return validatePublicStatus(await response.json());
+  return data === undefined ? publicStatus(await loadPublicCatalog(fetcher)) : validatePublicStatus(data);
 }

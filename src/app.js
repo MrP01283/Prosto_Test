@@ -5,7 +5,7 @@ import { CONFIG } from './config.js';
 import { uid, clone, shuffle, escapeHTML as h, normalize, newQuiz, newQuestion, questionErrors, quizErrors, parseQuestionBlock, parseQuestionBatch, copyQuestion, mergeQuestions, prepareQuestions, allowsQuestionRange, normalizeQuestionRange, makeResult, publishedQuiz, draftFromPublic, formatDuration } from './core.js';
 import { activeAttemptKey, elapsedAttempt, pauseAttempt, snapshotAttempt, snapshotProgress, validAttemptSnapshot } from './attempt-progress.js';
 import { db, openDB, putActiveProgress, completeAttempt, requestPersistentStorage } from './storage.js';
-import { GitHub, loadPublicCatalog, loadPublicStatus } from './github.js';
+import { GitHub, loadPublicCatalog, loadPublicIndex, loadPublicQuiz, loadPublicStatus } from './github.js';
 import { iconHTML, normalizeIcon } from './icons.js';
 import { openIconEditor } from './icon-editor.js';
 import { hasRememberedToken, hasVaultSession, rememberToken, restoreToken, forgetToken } from './token-vault.js';
@@ -14,7 +14,7 @@ import { isCreatorUnlocked, isCreatorRoute, unlockCreator, lockCreator } from '.
 const app = document.querySelector('#app');
 const dialog = document.querySelector('#dialog');
 let github = new GitHub();
-const state = {catalog:{schemaVersion:1,tests:[]}, remote:null, drafts:[], attempts:[], publicError:'', githubError:'', storageError:'', editor:null, selected:null, startSelection:null, route:'', attempt:null, result:null, busy:false, filter:'all', search:'', review:'all', saving:false, saveError:'', unsaved:false};
+const state = {publicIndex:null, creatorCatalog:null, remote:null, drafts:[], attempts:[], publicError:'', githubError:'', storageError:'', editor:null, selected:null, startSelection:null, route:'', attempt:null, result:null, busy:false, filter:'all', search:'', review:'all', saving:false, saveError:'', unsaved:false};
 const selection={quizId:null,mode:false,ids:new Set(),anchor:null};
 const mobileMedia=matchMedia('(max-width: 760px)');
 const mobileView=()=>mobileMedia.matches;
@@ -32,7 +32,7 @@ const routeLink = (text, route, cls='') => `<a class="button ${cls}" href="${h(l
 const empty = (title, text, action='') => `<section class="card empty"><div class="empty-icon" aria-hidden="true">▤</div><h2>${title}</h2><p>${text}</p>${action}</section>`;
 const notice = (text, type='') => `<div class="notice ${type}">${text}</div>`;
 const currentQuestion = () => state.editor?.questions.find(q => q.id === state.selected);
-const publicTests = () => (state.remote ?? state.catalog).tests;
+const publicTests = () => (state.remote ?? state.creatorCatalog)?.tests ?? [];
 
 function toast(text) {
   clearTimeout(toastTimer);
@@ -79,13 +79,17 @@ function catalogDate(quiz) {
   return `<div class="catalog-date" title="${h(label+': '+date(value))}">${label} <time datetime="${value.toISOString()}">${h(short)}</time></div>`;
 }
 function catalogCards() {
-  const tests = state.catalog.tests.filter(q => normalize(q.title).includes(normalize(state.search)));
-  if (!state.catalog.tests.length) return empty('Пока нет опубликованных тестов','Когда создатель опубликует первый тест, он появится здесь.');
+  const all = state.publicIndex?.tests ?? [];
+  const tests = all.filter(q => normalize(q.title).includes(normalize(state.search)));
+  if (!all.length) return empty('Пока нет опубликованных тестов','Когда создатель опубликует первый тест, он появится здесь.');
   if (!tests.length) return empty('Ничего не найдено','Попробуйте другое название.');
-  return `<div class="tests-grid">${tests.map(q=>`<article class="card test-card"><div class="between">${iconHTML(q.icon)}${q.status==='closed'?'<span class="pill bad">Закрыт</span>':''}</div><h3>${h(q.title)}</h3>${q.description?`<p>${h(q.description)}</p>`:''}<div class="card-meta">${q.questions.length} вопросов${q.settings.questionCount!==null?` · в попытке ${q.settings.questionCount}`:''}</div>${catalogDate(q)}<div class="actions">${q.status==='closed'?'<button class="button full" disabled>Тест закрыт</button>':routeLink('Начать тест',`/test/${q.id}`,'primary full')}</div></article>`).join('')}</div>`;
+  return `<div class="tests-grid">${tests.map(q=>`<article class="card test-card"><div class="between">${iconHTML(q.icon)}${q.status==='closed'?'<span class="pill bad">Закрыт</span>':''}</div><h3>${h(q.title)}</h3>${q.description?`<p>${h(q.description)}</p>`:''}<div class="card-meta">${q.questionTotal} вопросов${q.settings.questionCount!==null?` · в попытке ${q.settings.questionCount}`:''}</div>${catalogDate(q)}<div class="actions">${q.status==='closed'?'<button class="button full" disabled>Тест закрыт</button>':routeLink('Начать тест',`/test/${q.id}`,'primary full')}</div></article>`).join('')}</div>`;
 }
-function catalogPage() {
-  setContent(`<main id="main" class="page"><div class="between page-head"><div><div class="eyebrow">Каталог</div><h1>Доступные тесты</h1></div><label class="search"><span class="sr-only">Поиск по названию теста</span><input class="input" name="catalog-search" placeholder="Поиск по названию теста" value="${h(state.search)}"></label></div>${state.publicError?notice(`${h(state.publicError)} ${btn('Повторить','refresh-public','compact')}`,'error'):''}<div id="catalog-list">${state.publicError?'':catalogCards()}</div></main>`);
+function catalogPage(loading=false) {
+  const error = loading ? '' : state.publicError;
+  const contents = loading ? '<p class="muted" role="status">Загружаем список тестов…</p>' :
+    error ? notice(`${h(error)} ${btn('Повторить','refresh-public','compact')}`,'error') : catalogCards();
+  setContent(`<main id="main" class="page"><div class="between page-head"><div><div class="eyebrow">Каталог</div><h1>Доступные тесты</h1></div><label class="search"><span class="sr-only">Поиск по названию теста</span><input class="input" name="catalog-search" placeholder="Поиск по названию теста" value="${h(state.search)}" ${loading||error?'disabled':''}></label></div><div id="catalog-list">${contents}</div></main>`);
 }
 function allAdminTests() {
   const map = new Map(publicTests().map(q => [q.id,{...q,local:false}]));
@@ -231,15 +235,20 @@ function editorPage() {
   updateSaveStatus();
 }
 
-function findQuiz(id) { return state.catalog.tests.find(q=>q.id===id); }
 async function startPage(quiz, preview=false) {
   if (!quiz) return unavailable('Тест не найден','Возможно, создатель удалил его или ссылка неполная.');
-  if (!preview && quiz.status==='closed') {await discardProgress(quiz.id,false);return unavailable('Тест закрыт','Создатель остановил доступ. Можно вернуться в каталог и выбрать другой тест.');}
   const version=routeVersion;
-  state.savedAttempt=await readProgress(quiz.id,preview);if(version!==routeVersion)return;
-  const total = quiz.settings.questionCount ?? quiz.questions.length;
-  state.startSelection = allowsQuestionRange(quiz) && quiz.questions.length ? {id:quiz.id,total:quiz.questions.length,ranges:[{from:1,to:quiz.questions.length}],mode:'range',count:Math.min(30,quiz.questions.length)} : null;
-  setContent(`<main id="main" class="page narrow">${preview?notice('Пробное прохождение. Результат не попадёт в историю.','warning'):''}<section class="card start-card">${iconHTML(quiz.icon,"large")}${preview?'<div class="eyebrow">Предпросмотр</div>':''}<h1>${h(quiz.title)}</h1>${quiz.description?`<p class="muted pre">${h(quiz.description)}</p>`:''}<div class="start-summary"><span class="eyebrow">В этой попытке</span><b id="start-question-count">${total} вопросов</b><small id="start-question-note">${total<quiz.questions.length?`случайно из ${quiz.questions.length}`:'все вопросы теста'}</small></div>${state.startSelection?questionRangeControls():''}${state.savedAttempt?`<p class="muted small">Продолжить с вопроса ${state.savedAttempt.index+1} из ${state.savedAttempt.questions.length}${state.savedAttempt.questionRange?` · ${h(rangeLabel(state.savedAttempt))}`:''}</p>${btn('Продолжить','resume-attempt','primary large',`data-id="${h(quiz.id)}"`)} `:''}${btn(state.savedAttempt?'Начать заново':'Начать прохождение',preview?'start-preview':'start-test','primary large',`id="start-attempt" data-id="${h(quiz.id)}"`)}${preview?`<div class="mt">${routeLink('Вернуться в конструктор',`/edit/${quiz.id}`)}</div>`:''}</section></main>`);
+  if (!preview && quiz.status==='closed') {
+    await discardProgress(quiz.id,false).catch(reportError);
+    if(version===routeVersion)unavailable('Тест закрыт','Создатель остановил доступ. Можно вернуться в каталог и выбрать другой тест.');
+    return;
+  }
+  const saved=await readProgress(quiz.id,preview);if(version!==routeVersion)return;
+  state.savedAttempt=saved;
+  const questionTotal = quiz.questionTotal ?? quiz.questions.length;
+  const total = quiz.settings.questionCount ?? questionTotal;
+  state.startSelection = allowsQuestionRange(quiz) && questionTotal ? {id:quiz.id,total:questionTotal,ranges:[{from:1,to:questionTotal}],mode:'range',count:Math.min(30,questionTotal)} : null;
+  setContent(`<main id="main" class="page narrow">${preview?notice('Пробное прохождение. Результат не попадёт в историю.','warning'):''}<section class="card start-card">${iconHTML(quiz.icon,"large")}${preview?'<div class="eyebrow">Предпросмотр</div>':''}<h1>${h(quiz.title)}</h1>${quiz.description?`<p class="muted pre">${h(quiz.description)}</p>`:''}<div class="start-summary"><span class="eyebrow">В этой попытке</span><b id="start-question-count">${total} вопросов</b><small id="start-question-note">${total<questionTotal?`случайно из ${questionTotal}`:'все вопросы теста'}</small></div>${state.startSelection?questionRangeControls():''}${state.savedAttempt?`<p class="muted small">Продолжить с вопроса ${state.savedAttempt.index+1} из ${state.savedAttempt.questions.length}${state.savedAttempt.questionRange?` · ${h(rangeLabel(state.savedAttempt))}`:''}</p>${btn('Продолжить','resume-attempt','primary large',`data-id="${h(quiz.id)}"`)} `:''}${btn(state.savedAttempt?'Начать заново':'Начать прохождение',preview?'start-preview':'start-test','primary large',`id="start-attempt" data-id="${h(quiz.id)}"`)}${preview?`<div class="mt">${routeLink('Вернуться в конструктор',`/edit/${quiz.id}`)}</div>`:''}</section></main>`);
   if (state.startSelection) syncQuestionRange();
 }
 
@@ -306,7 +315,11 @@ function rangeLabel(result) {
   if(r.mode==='random')return `Случайные ${r.count} из ${total}`;
   return `Вопросы №${(r.ranges??[r]).map(r=>r.from===r.to?r.from:`${r.from}–${r.to}`).join(', ')} из ${total}`;
 }
-function unavailable(title,text) {setContent(`<main id="main" class="page narrow">${empty(h(title),h(text),routeLink('Все тесты','/catalog','primary'))}</main>`);}
+function unavailable(title,text,retry=false) {
+  const actions = retry ? btn('Повторить','refresh-public','primary')+' '+routeLink('Все тесты','/catalog') :
+    routeLink('Все тесты','/catalog','primary');
+  setContent(`<main id="main" class="page narrow">${empty(h(title),h(text),actions)}</main>`);
+}
 
 function closeRestartMenu() {
   const a=restartMenuAttempt;if(!a)return;
@@ -515,7 +528,7 @@ function updateCopyCount() {document.querySelector('#copy-count').textContent=`�
 
 async function refreshAdmin() {
   if(github.connected){state.remote=(await github.readCatalog()).catalog;}
-  else {state.catalog=await loadPublicCatalog();state.publicError='';}
+  else state.creatorCatalog=await loadPublicCatalog();
 }
 async function publishDraft() {
   await flushDraft();
@@ -578,12 +591,14 @@ function saveProgress(a=state.attempt) {
   return progressQueue;
 }
 async function discardProgress(id,preview=false) {await progressQueue;await db.remove('activeAttempts',activeAttemptKey(id,preview));}
-async function beginAttempt(quiz,preview=false,range=null,fresh=null) {
-  const version=routeVersion,saved=fresh?null:await readProgress(quiz.id,preview);if(version!==routeVersion)return;
+async function beginAttempt(quiz,preview=false,range=null,prepared=null) {
+  const version=routeVersion;
+  const saved=prepared?prepared.saved??null:await readProgress(quiz.id,preview);
+  if(version!==routeVersion)return;
   const errors=quizErrors(saved?.quiz??quiz);if(errors.length){showErrors(errors);return;}
   stopAttempt();
   const questionRange=saved?.questionRange??(allowsQuestionRange(quiz)?normalizeQuestionRange(quiz.questions.length,range??{}):null);
-  state.attempt={...(saved??{}),attemptId:saved?.attemptId??uid(),quiz:clone(saved?.quiz??quiz),questionRange,questions:fresh?.questions??saved?.questions??prepareQuestions(quiz,Math.random,questionRange),answers:saved?.answers??[],index:saved?.index??0,startedAt:saved?.startedAt??Date.now(),elapsedMs:saved?.elapsedMs??0,activeSince:document.hidden?null:performance.now(),lastCheck:Date.now(),preview,blocked:'',saveError:'',checking:false,done:false,timer:null,advance:null,poll:null};
+  state.attempt={...(saved??{}),attemptId:saved?.attemptId??uid(),quiz:clone(saved?.quiz??quiz),questionRange,questions:prepared?.questions??saved?.questions??prepareQuestions(quiz,Math.random,questionRange),answers:saved?.answers??[],index:saved?.index??0,startedAt:saved?.startedAt??Date.now(),elapsedMs:saved?.elapsedMs??0,activeSince:document.hidden?null:performance.now(),lastCheck:Date.now(),preview,blocked:'',saveError:'',checking:false,done:false,timer:null,advance:null,poll:null};
   const a=state.attempt;a.progressInitialized=!!saved;
   a.timer=setInterval(()=>{const elapsed=document.querySelector('#elapsed');if(elapsed)elapsed.textContent=formatDuration(elapsedAttempt(a));if(!document.hidden)saveProgress(a);},1000);
   if(!preview)a.poll=setInterval(()=>checkAccess(a).catch(error=>{if(state.attempt===a){a.blocked=errorMessage(error);playPage();}}),CONFIG.statusInterval);
@@ -638,6 +653,33 @@ async function nextQuestion() {
   } catch(error){if(state.attempt===a){a.done=false;a.blocked=errorMessage(error);a.checking=false;playPage();}}
 }
 
+async function openPublicTest(section,id,version,range=null) {
+  const loading = section==='run' ? 'Загружаем вопросы…' : 'Проверяем доступность теста…';
+  setContent(`<main id="main" class="loading" role="status">${loading}</main>`);
+  try {
+    const index=await loadPublicIndex();
+    if(version!==routeVersion)return;
+    const entry=index.tests.find(quiz=>quiz.id===id);
+    if(!entry){
+      if(id)await discardProgress(id).catch(reportError);
+      if(version===routeVersion)await startPage(null);
+      return;
+    }
+    if(section==='test'||entry.status==='closed'){
+      await startPage(entry);
+      return;
+    }
+    const saved=await readProgress(id);
+    if(version!==routeVersion)return;
+    const quiz=saved?.quiz??await loadPublicQuiz(entry);
+    if(version!==routeVersion)return;
+    await beginAttempt(quiz,false,range,{saved});
+    if(version===routeVersion&&state.attempt)playPage();
+  } catch(error) {
+    if(version===routeVersion)unavailable('Не удалось открыть тест',errorMessage(error),true);
+  }
+}
+
 async function route() {
   const version=++routeVersion;
   let path=location.hash.slice(1)||'/catalog';
@@ -658,8 +700,24 @@ async function route() {
     if(!isCreatorUnlocked()){creatorLoginPage();return;}
     state.drafts=await db.all('drafts').catch(error=>{state.storageError=errorMessage(error);return state.drafts;});
     if(version!==routeVersion)return;
+    if(section!=='preview-result'&&!state.remote&&!state.creatorCatalog){
+      try{state.creatorCatalog=await loadPublicCatalog();}
+      catch(error){if(version===routeVersion)reportError(error);}
+      if(version!==routeVersion)return;
+    }
   }
-  if(section==='catalog'){catalogPage();}
+  if(section==='catalog'){
+    catalogPage(true);
+    try{
+      const index=await loadPublicIndex();
+      if(version!==routeVersion)return;
+      state.publicIndex=index;state.publicError='';
+    }catch(error){
+      if(version!==routeVersion)return;
+      state.publicError=errorMessage(error);
+    }
+    catalogPage();
+  }
   else if(section==='admin'){adminPage();}
   else if(section==='edit'){
     state.editor=state.editor?.id===id?state.editor:await getDraft(id);
@@ -668,9 +726,7 @@ async function route() {
     else{if(!state.editor.questions.some(q=>q.id===state.selected))state.selected=state.editor.questions[0]?.id;editorPage();}
   }
   else if(section==='test'){
-    setContent('<main id="main" class="loading">Проверяем доступность теста…</main>');
-    try{state.catalog=await loadPublicCatalog();state.publicError='';if(version===routeVersion){if(!findQuiz(id))await discardProgress(id);await startPage(findQuiz(id));}}
-    catch(error){if(version===routeVersion)unavailable('Не удалось открыть тест',errorMessage(error));}
+    await openPublicTest(section,id,version);
   }
   else if(section==='preview'){
     const draft=await getDraft(id);if(version!==routeVersion)return;
@@ -678,14 +734,19 @@ async function route() {
   }
   else if(section==='run'||section==='run-preview'){
     if(!state.attempt){
-      let quiz;
-      if(section==='run-preview')quiz=await getDraft(id);
-      else{state.catalog=await loadPublicCatalog();quiz=findQuiz(id);}
-      if(version!==routeVersion)return;
-      if(!quiz||quiz.status==='closed'&&section!=='run-preview'){await discardProgress(id,section==='run-preview');await startPage(quiz);return;}
-      await beginAttempt(quiz,section==='run-preview',params.has('ranges')?{ranges:params.get('ranges').split(',').map(part=>{const [from,to]=part.split('-');return {from,to};})}:{mode:params.get('mode'),count:params.get('count'),from:params.get('from'),to:params.get('to')});
+      const range=params.has('ranges')?{ranges:params.get('ranges').split(',').map(part=>{const [from,to]=part.split('-');return {from,to};})}:{mode:params.get('mode'),count:params.get('count'),from:params.get('from'),to:params.get('to')};
+      if(section==='run'){
+        await openPublicTest(section,id,version,range);
+      }else{
+        const quiz=await getDraft(id);
+        if(version!==routeVersion)return;
+        if(!quiz){await startPage(null);return;}
+        await beginAttempt(quiz,true,range);
+        if(version===routeVersion&&state.attempt)playPage();
+      }
+    }else if(version===routeVersion){
+      playPage();
     }
-    if(version===routeVersion)playPage();
   }
   else if(section==='history'){state.attempts=await db.all('attempts').catch(error=>{state.storageError=errorMessage(error);return state.attempts;});if(version===routeVersion)historyPage();}
   else if(section==='result'||section==='preview-result'){
@@ -757,7 +818,7 @@ async function handleAction(action,element,event={}) {
   if(action==='forget-token'){forgetToken();connectionEpoch++;restoreAttempted=true;github.disconnect();state.remote=null;state.githubError='';closeDialog();await route();toast('Сохранённый ключ удалён из этого браузера.');return;}
   if(action==='edit-icon'){const quiz=state.editor;openIconEditor(quiz,showDialog,closeDialog,icon=>{if(state.editor!==quiz)return;quiz.icon=normalizeIcon(icon);markDirty();editorPage();});return;}
   if(action==='new'){await newDraft();return;}
-  if(action==='refresh-public'){state.catalog=await loadPublicCatalog();state.publicError='';catalogPage();return;}
+  if(action==='refresh-public'){await route();return;}
   if(action==='refresh-admin'){await refreshAdmin();adminPage();toast('Список обновлён.');return;}
   if(action==='filter'){state.filter=element.dataset.filter;adminPage();return;}
   if(action==='edit'){location.hash=link(`/edit/${id}`);return;}
@@ -960,7 +1021,5 @@ window.addEventListener('pagehide',()=>{if(state.attempt&&!state.attempt.done){p
 window.addEventListener('pageshow',event=>{if(event.persisted&&state.attempt&&!state.attempt.done)state.attempt.activeSince=performance.now();});
 mobileMedia.addEventListener('change',async()=>{if(isCreatorUnlocked()&&(state.route==='/admin'||state.route.startsWith('/edit/'))){closeDialog();await flushDraft().catch(reportError);if(state.editor)editorPage();else adminPage();}});
 
-const loaded=await Promise.allSettled([loadPublicCatalog(),openDB()]);
-if(loaded[0].status==='fulfilled')state.catalog=loaded[0].value;else state.publicError=errorMessage(loaded[0].reason);
-if(loaded[1].status==='rejected')state.storageError=errorMessage(loaded[1].reason);
+openDB().catch(error=>{state.storageError=errorMessage(error);});
 route().catch(error=>unavailable('Не удалось открыть страницу',errorMessage(error)));
