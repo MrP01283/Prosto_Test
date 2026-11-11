@@ -4,6 +4,7 @@ import { rangeIds, moveSelectedQuestions, selectedNumbers } from './question-sel
 import { CONFIG } from './config.js';
 import { uid, clone, shuffle, escapeHTML as h, normalize, newQuiz, newQuestion, questionErrors, quizErrors, parseQuestionBlock, parseQuestionBatch, copyQuestion, mergeQuestions, prepareQuestions, allowsQuestionRange, normalizeQuestionRange, makeResult, publishedQuiz, draftFromPublic, formatDuration } from './core.js';
 import { activeAttemptKey, elapsedAttempt, pauseAttempt, snapshotAttempt, snapshotProgress, validAttemptSnapshot } from './attempt-progress.js';
+import { restoreQuestionQueue, answeredQuestionCount, deferCurrentQuestion, advanceQuestionQueue } from './question-queue.js';
 import { db, openDB, putActiveProgress, completeAttempt, requestPersistentStorage } from './storage.js';
 import { GitHub, loadPublicCatalog, loadPublicIndex, loadPublicQuiz, loadPublicStatus } from './github.js';
 import { iconHTML, normalizeIcon } from './icons.js';
@@ -248,7 +249,7 @@ async function startPage(quiz, preview=false) {
   const questionTotal = quiz.questionTotal ?? quiz.questions.length;
   const total = quiz.settings.questionCount ?? questionTotal;
   state.startSelection = allowsQuestionRange(quiz) && questionTotal ? {id:quiz.id,total:questionTotal,ranges:[{from:1,to:questionTotal}],mode:'range',count:Math.min(30,questionTotal)} : null;
-  setContent(`<main id="main" class="page narrow">${preview?notice('Пробное прохождение. Результат не попадёт в историю.','warning'):''}<section class="card start-card">${iconHTML(quiz.icon,"large")}${preview?'<div class="eyebrow">Предпросмотр</div>':''}<h1>${h(quiz.title)}</h1>${quiz.description?`<p class="muted pre">${h(quiz.description)}</p>`:''}<div class="start-summary"><span class="eyebrow">В этой попытке</span><b id="start-question-count">${total} вопросов</b><small id="start-question-note">${total<questionTotal?`случайно из ${questionTotal}`:'все вопросы теста'}</small></div>${state.startSelection?questionRangeControls():''}${state.savedAttempt?`<p class="muted small">Продолжить с вопроса ${state.savedAttempt.index+1} из ${state.savedAttempt.questions.length}${state.savedAttempt.questionRange?` · ${h(rangeLabel(state.savedAttempt))}`:''}</p>${btn('Продолжить','resume-attempt','primary large',`data-id="${h(quiz.id)}"`)} `:''}${btn(state.savedAttempt?'Начать заново':'Начать прохождение',preview?'start-preview':'start-test','primary large',`id="start-attempt" data-id="${h(quiz.id)}"`)}${preview?`<div class="mt">${routeLink('Вернуться в конструктор',`/edit/${quiz.id}`)}</div>`:''}</section></main>`);
+  setContent(`<main id="main" class="page narrow">${preview?notice('Пробное прохождение. Результат не попадёт в историю.','warning'):''}<section class="card start-card">${iconHTML(quiz.icon,"large")}${preview?'<div class="eyebrow">Предпросмотр</div>':''}<h1>${h(quiz.title)}</h1>${quiz.description?`<p class="muted pre">${h(quiz.description)}</p>`:''}<div class="start-summary"><span class="eyebrow">В этой попытке</span><b id="start-question-count">${total} вопросов</b><small id="start-question-note">${total<questionTotal?`случайно из ${questionTotal}`:'все вопросы теста'}</small></div>${state.startSelection?questionRangeControls():''}${state.savedAttempt?`<p class="muted small">Отвечено ${answeredQuestionCount(state.savedAttempt)} из ${state.savedAttempt.questions.length}${state.savedAttempt.questionRange?` · ${h(rangeLabel(state.savedAttempt))}`:''}</p>${btn('Продолжить','resume-attempt','primary large',`data-id="${h(quiz.id)}"`)} `:''}${btn(state.savedAttempt?'Начать заново':'Начать прохождение',preview?'start-preview':'start-test','primary large',`id="start-attempt" data-id="${h(quiz.id)}"`)}${preview?`<div class="mt">${routeLink('Вернуться в конструктор',`/edit/${quiz.id}`)}</div>`:''}</section></main>`);
   if (state.startSelection) syncQuestionRange();
 }
 
@@ -332,13 +333,19 @@ document.addEventListener('keydown',event=>{if(event.key==='Escape'&&restartMenu
 
 function playerFeedbackHTML(a) {
   const q=a.questions[a.index],selected=a.answers[a.index],answered=selected!==undefined,correct=selected===q.correctOptionId;
-  return `${answered?(correct?'<span class="good-text">✓ Верно</span>':`<span class="bad-text">Неверно</span>${btn(a.index===a.questions.length-1?'Посмотреть результат':'Следующий вопрос →','next-question','primary large')}`):`<span class="muted small">${a.checking?'Проверяем доступность теста…':''}</span>`}`;
+  if(answered)return correct?'<span class="good-text">✓ Верно</span>':
+    `<span class="bad-text">Неверно</span>${btn(a.queue.length===1?'Посмотреть результат':'Следующий вопрос →','next-question','primary large')}`;
+  return `<span class="muted small">${a.checking?'Проверяем доступность теста…':''}</span>${btn('Отложить вопрос','defer-question','',a.queue.length<2||a.checking||a.blocked?'disabled':'')}`;
 }
 function playerQuestionHTML(a) {
   const q=a.questions[a.index],selected=a.answers[a.index],answered=selected!==undefined,correct=selected===q.correctOptionId;
   return `<h2>${h(q.text)}</h2>${q.options.map((o,i)=>`<button class="answer ${answered&&o.id===q.correctOptionId?'good':''} ${answered&&o.id===selected&&!correct?'bad':''}" data-action="answer" data-id="${h(o.id)}" ${answered||a.checking||a.blocked?'disabled':''}><span class="letter">${i<26?String.fromCharCode(65+i):i+1}</span><span class="answer-text">${h(o.text)}</span>${answered&&o.id===q.correctOptionId?'<span class="answer-tag">✓ Правильный ответ</span>':''}${answered&&o.id===selected&&!correct?'<span class="answer-tag">✕ Ваш ответ</span>':''}</button>`).join('')}<div class="feedback ${playerPrefs.side==='left'?'feedback-left':''}" aria-live="polite">${playerFeedbackHTML(a)}</div>`;
 }
-function playerHeadingHTML(a){const q=a.questions[a.index];return `<div><div class="eyebrow">${h(a.quiz.title)}</div><h1>Вопрос ${a.index+1} из ${a.questions.length}</h1>${a.questionRange?`<span class="muted small">№${q.originalIndex} в общем списке · ${h(rangeLabel(a))}</span>`:''}</div><span class="pill">◷ <span id="elapsed">${formatDuration(elapsedAttempt(a))}</span></span>`;}
+function playerHeadingHTML(a) {
+  const q=a.questions[a.index],deferred=a.deferred.includes(a.index);
+  const deferredCount=a.deferred.length-(deferred&&a.answers[a.index]!==undefined?1:0);
+  return `<div><div class="eyebrow">${h(a.quiz.title)}</div><h1>Отвечено ${answeredQuestionCount(a)} из ${a.questions.length}</h1><div class="quiz-heading-meta muted small"><span>№${q.originalIndex??a.index+1} в общем списке${a.questionRange?` · ${h(rangeLabel(a))}`:''}</span>${deferred?'<span class="pill">Отложенный</span>':''}${deferredCount?`<span>Отложено: ${deferredCount}</span>`:''}</div></div><span class="pill">◷ <span id="elapsed">${formatDuration(elapsedAttempt(a))}</span></span>`;
+}
 function playerNoticesHTML(a){return `${a.saveError?notice(h(a.saveError)+' Прогресс пока не сохранён.','error'):''}${a.preview?notice('Предпросмотр · без записи в историю','warning'):''}${a.blocked?notice(`${h(a.blocked)} ${btn('Проверить соединение','retry-status','compact')}`,'error'):''}`;}
 
 function playPage() {
@@ -365,24 +372,24 @@ function playPage() {
       const feedback=card.querySelector('.feedback');feedback.classList.toggle('feedback-left',playerPrefs.side==='left');feedback.innerHTML=playerFeedbackHTML(a);
     }else{
       card.outerHTML=`<section class="card quiz-card" data-question-id="${h(q.id)}">${playerQuestionHTML(a)}</section>`;
-      existing.querySelector('.quiz-top').innerHTML=playerHeadingHTML(a);
     }
-    existing.querySelector('.progress').value=a.index;
+    existing.querySelector('.quiz-top').innerHTML=playerHeadingHTML(a);
+    existing.querySelector('.progress').value=answeredQuestionCount(a);
     const side=existing.querySelector('[data-action=player-side]');
     side.textContent=playerPrefs.side==='left'?'Кнопка: слева':'Кнопка: справа';
     side.setAttribute('aria-label',`Положение кнопки перехода: ${playerPrefs.side==='left'?'слева':'справа'}`);
-    document.title=`Вопрос ${a.index+1} из ${a.questions.length} · Prosto Test`;
+    document.title=`Отвечено ${answeredQuestionCount(a)} из ${a.questions.length} · Prosto Test`;
     app.dispatchEvent(new Event('quiz-rendered'));
     if(scroll)window.scrollTo(scroll.x,scroll.y);return;
   }
-  setContent(`<main id="main" class="quiz-page" data-attempt-id="${h(a.attemptId)}"><div class="player-notices">${playerNoticesHTML(a)}</div><div class="quiz-top mt-sm">${playerHeadingHTML(a)}</div><progress class="progress" max="${a.questions.length}" value="${a.index}" aria-label="Прогресс"></progress><section class="card quiz-card" data-question-id="${h(q.id)}">${playerQuestionHTML(a)}</section><div class="player-tools">${btn(playerPrefs.side==='left'?'Кнопка: слева':'Кнопка: справа','player-side','compact',`aria-label="Положение кнопки перехода: ${playerPrefs.side==='left'?'слева':'справа'}"`)}<div class="restart-control">${btn('Начать заново','restart-attempt','primary compact','aria-expanded="false" aria-controls="restart-menu"')}<div id="restart-menu" class="restart-menu card" hidden aria-label="Начать заново">${btn('С выбранными вопросами','restart-same','full')}${btn('С новыми вопросами','restart-new','full')}</div></div></div></main>`,'catalog',true);
+  setContent(`<main id="main" class="quiz-page" data-attempt-id="${h(a.attemptId)}"><div class="player-notices">${playerNoticesHTML(a)}</div><div class="quiz-top mt-sm">${playerHeadingHTML(a)}</div><progress class="progress" max="${a.questions.length}" value="${answeredQuestionCount(a)}" aria-label="Отвечено вопросов"></progress><section class="card quiz-card" data-question-id="${h(q.id)}">${playerQuestionHTML(a)}</section><div class="player-tools">${btn(playerPrefs.side==='left'?'Кнопка: слева':'Кнопка: справа','player-side','compact',`aria-label="Положение кнопки перехода: ${playerPrefs.side==='left'?'слева':'справа'}"`)}<div class="restart-control">${btn('Начать заново','restart-attempt','primary compact','aria-expanded="false" aria-controls="restart-menu"')}<div id="restart-menu" class="restart-menu card" hidden aria-label="Начать заново">${btn('С выбранными вопросами','restart-same','full')}${btn('С новыми вопросами','restart-new','full')}</div></div></div></main>`,'catalog',true);
 
 }
 
 function reviewCards(result) {
   const items=result.questions.map((q,i)=>({...q,number:i+1})).filter(q=>state.review==='all'||!q.correct);
   if (!items.length) return empty('Все ответы правильные','Вы прошли тест без ошибок.');
-  return items.map(q=>`<article class="card review-card"><div class="between"><span class="eyebrow">Вопрос ${q.number}${result.questionRange?` · №${q.originalIndex} в общем списке`:''}</span><span class="pill ${q.correct?'good':'bad'}">${q.correct?'Верно':'Ошибка'}</span></div><h3>${h(q.text)}</h3><div class="review-options">${q.options.map(o=>`<div class="review-option ${o.id===q.correctOptionId?'good':''} ${o.id===q.selectedOptionId&&!q.correct?'bad':''}"><span class="pre grow">${h(o.text)}</span>${o.id===q.selectedOptionId?`<span class="pill ${q.correct?'good':'bad'}">Ваш ответ</span>`:''}${o.id===q.correctOptionId?'<span class="pill good">Правильный</span>':''}</div>`).join('')}</div></article>`).join('');
+  return items.map(q=>`<article class="card review-card"><div class="between"><span class="eyebrow">Вопрос ${q.number}${Number.isInteger(q.originalIndex)?` · №${q.originalIndex} в общем списке`:''}</span><span class="pill ${q.correct?'good':'bad'}">${q.correct?'Верно':'Ошибка'}</span></div><h3>${h(q.text)}</h3><div class="review-options">${q.options.map(o=>`<div class="review-option ${o.id===q.correctOptionId?'good':''} ${o.id===q.selectedOptionId&&!q.correct?'bad':''}"><span class="pre grow">${h(o.text)}</span>${o.id===q.selectedOptionId?`<span class="pill ${q.correct?'good':'bad'}">Ваш ответ</span>`:''}${o.id===q.correctOptionId?'<span class="pill good">Правильный</span>':''}</div>`).join('')}</div></article>`).join('');
 }
 function resultPage(result, preview=false) {
   if (!result) return unavailable('Результат не найден','Он мог быть удалён вместе с данными браузера или сохранён на другом устройстве.');
@@ -599,7 +606,9 @@ async function beginAttempt(quiz,preview=false,range=null,prepared=null) {
   stopAttempt();
   const questionRange=saved?.questionRange??(allowsQuestionRange(quiz)?normalizeQuestionRange(quiz.questions.length,range??{}):null);
   state.attempt={...(saved??{}),attemptId:saved?.attemptId??uid(),quiz:clone(saved?.quiz??quiz),questionRange,questions:prepared?.questions??saved?.questions??prepareQuestions(quiz,Math.random,questionRange),answers:saved?.answers??[],index:saved?.index??0,startedAt:saved?.startedAt??Date.now(),elapsedMs:saved?.elapsedMs??0,activeSince:document.hidden?null:performance.now(),lastCheck:Date.now(),preview,blocked:'',saveError:'',checking:false,done:false,timer:null,advance:null,poll:null};
-  const a=state.attempt;a.progressInitialized=!!saved;
+  const a=state.attempt;
+  Object.assign(a,restoreQuestionQueue(a));
+  a.progressInitialized=!!saved;
   a.timer=setInterval(()=>{const elapsed=document.querySelector('#elapsed');if(elapsed)elapsed.textContent=formatDuration(elapsedAttempt(a));if(!document.hidden)saveProgress(a);},1000);
   if(!preview)a.poll=setInterval(()=>checkAccess(a).catch(error=>{if(state.attempt===a){a.blocked=errorMessage(error);playPage();}}),CONFIG.statusInterval);
   await saveProgress(a);
@@ -628,20 +637,38 @@ async function chooseAnswer(optionId) {
   const a=state.attempt;if(!a||a.done||a.checking||a.blocked||a.answers[a.index]!==undefined)return;
   a.checking=true;
   document.querySelectorAll('.answer').forEach(button=>button.disabled=true);
+  const deferButton=document.querySelector('[data-action=defer-question]');
+  if(deferButton)deferButton.disabled=true;
   document.querySelector('.quiz-card')?.setAttribute('aria-busy','true');
   try {
-    if(!(await checkAccess(a,a.index===a.questions.length-1)))return;
+    if(!(await checkAccess(a,a.queue.length===1)))return;
     const q=a.questions[a.index];if(!q.options.some(o=>o.id===optionId))return;
     a.answers[a.index]=optionId;await saveProgress(a);if(state.attempt!==a)return;a.checking=false;playPage();
     if(optionId===q.correctOptionId)a.advance=setTimeout(()=>nextQuestion().catch(reportError),CONFIG.correctDelay);
   } catch(error){if(state.attempt===a){a.blocked=errorMessage(error);a.checking=false;playPage();}}
 }
+async function postponeQuestion() {
+  const a=state.attempt;
+  if(!a||a.done||a.checking||a.blocked||a.answers[a.index]!==undefined||a.queue.length<2)return;
+  a.checking=true;
+  document.querySelectorAll('.answer,[data-action=defer-question]').forEach(button=>button.disabled=true);
+  document.querySelector('.quiz-card')?.setAttribute('aria-busy','true');
+  try {
+    if(!(await checkAccess(a)))return;
+    deferCurrentQuestion(a);
+    await saveProgress(a);
+    if(state.attempt!==a)return;
+    a.checking=false;playPage();window.scrollTo(0,0);
+  }catch(error){
+    if(state.attempt===a){a.blocked=errorMessage(error);a.checking=false;playPage();}
+  }
+}
 async function nextQuestion() {
   const a=state.attempt;if(!a||a.done||a.checking||a.answers[a.index]===undefined)return;
   clearTimeout(a.advance);a.checking=true;
   try {
-    if(!(await checkAccess(a,a.index===a.questions.length-1)))return;
-    if(a.index+1<a.questions.length){a.index++;await saveProgress(a);if(state.attempt!==a)return;a.checking=false;playPage();window.scrollTo(0,0);return;}
+    if(!(await checkAccess(a,a.queue.length===1)))return;
+    if(advanceQuestionQueue(a)){await saveProgress(a);if(state.attempt!==a)return;a.checking=false;playPage();window.scrollTo(0,0);return;}
     a.done=true;
     pauseAttempt(a);const result=makeResult(a.quiz,a.questions,a.answers,a.startedAt,Date.now(),a.questionRange);result.durationMs=a.elapsedMs;result.id=a.attemptId;
     await progressQueue;
@@ -901,6 +928,7 @@ async function handleAction(action,element,event={}) {
     location.hash=link(`/${action==='start-preview'?'run-preview':'run'}/${id}${selectionQuery(r)}`);return;
   }
   if(action==='answer'){await chooseAnswer(id);return;}
+  if(action==='defer-question'){await postponeQuestion();return;}
   if(action==='next-question'){await nextQuestion();return;}
   if(action==='retry-status'){
     const a=state.attempt;if(!a)return;

@@ -35,7 +35,10 @@ async function getActiveAttempt(id) {
     const base=tx.objectStore('activeAttempts').get(id),progress=tx.objectStore('activeProgress').get(id);
     tx.oncomplete=()=>{
       const saved=base.result,checkpoint=progress.result;
-      resolve(saved&&checkpoint?.attemptId===saved.attemptId?{...saved,answers:checkpoint.answers,index:checkpoint.index,elapsedMs:checkpoint.elapsedMs}:saved);
+      resolve(saved&&checkpoint?.attemptId===saved.attemptId?{
+        ...saved,answers:checkpoint.answers,index:checkpoint.index,elapsedMs:checkpoint.elapsedMs,
+        queue:checkpoint.queue,deferred:checkpoint.deferred,
+      }:saved);
     };
     tx.onerror=tx.onabort=()=>reject(new Error('Не удалось восстановить сохранённую попытку.'));
   });

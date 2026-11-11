@@ -15,3 +15,5 @@
 
 /* Keep the complete review searchable while laying out off-screen cards on demand. */
 .review-card{content-visibility:auto;contain-intrinsic-size:auto 480px}
+
+.quiz-heading-meta{display:flex;align-items:center;gap:6px 12px;flex-wrap:wrap}

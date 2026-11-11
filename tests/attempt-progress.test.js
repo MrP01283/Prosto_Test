@@ -22,7 +22,7 @@ test('invalid progress, foreign questions and mismatched modes are rejected',()=
 test('frequent checkpoints contain only detached mutable progress, never the full quiz',()=>{
  const a=attempt(),base=snapshotAttempt(a,1000);a.answers[0]=a.questions[0].correctOptionId;a.index=1;
  const delta=snapshotProgress(a,1500);
- assert.deepEqual(Object.keys(delta).sort(),['answers','attemptId','elapsedMs','id','index']);
+ assert.deepEqual(Object.keys(delta).sort(),['answers','attemptId','deferred','elapsedMs','id','index','queue']);
  assert.equal(delta.quiz,undefined);assert.equal(delta.questions,undefined);assert.equal(delta.elapsedMs,1000);
  assert.equal(validAttemptSnapshot({...base,...delta},a.quiz.id),true);
  a.answers[0]='changed';assert.notEqual(delta.answers[0],'changed');
