@@ -4,7 +4,9 @@ import { rangeIds, moveSelectedQuestions, selectedNumbers } from './question-sel
 import { CONFIG } from './config.js';
 import { uid, clone, shuffle, escapeHTML as h, normalize, newQuiz, newQuestion, questionErrors, quizErrors, parseQuestionBlock, parseQuestionBatch, copyQuestion, mergeQuestions, prepareQuestions, allowsQuestionRange, normalizeQuestionRange, makeResult, publishedQuiz, draftFromPublic, formatDuration } from './core.js';
 import { activeAttemptKey, elapsedAttempt, pauseAttempt, snapshotAttempt, snapshotProgress, validAttemptSnapshot } from './attempt-progress.js';
-import { restoreQuestionQueue, answeredQuestionCount, deferCurrentQuestion, advanceQuestionQueue } from './question-queue.js';
+import { restoreQuestionQueue, answeredQuestionCount, deferCurrentQuestion, advanceQuestionQueue,
+  restoreSecondChance, isSecondRound, currentAnswers, roundQuestionTotal, attemptProgressLabel,
+  recordAttemptAnswer, beginSecondChance, addSecondChanceResult } from './question-queue.js';
 import { db, openDB, putActiveProgress, completeAttempt, requestPersistentStorage } from './storage.js';
 import { GitHub, loadPublicCatalog, loadPublicIndex, loadPublicQuiz, loadPublicStatus } from './github.js';
 import { iconHTML, normalizeIcon } from './icons.js';
@@ -236,6 +238,9 @@ function editorPage() {
   updateSaveStatus();
 }
 
+function secondChanceControls(saved) {
+  return `<label class="check second-chance-option"><input id="second-chance" type="checkbox" ${saved?.secondChance?'checked':''}><span><b>Второй шанс</b><small>Повторить ошибочные вопросы в конце. Процент — по первым ответам.</small>${saved?'<small>Выбор применяется при новом запуске. Продолжение сохраняет режим попытки.</small>':''}</span></label>`;
+}
 async function startPage(quiz, preview=false) {
   if (!quiz) return unavailable('Тест не найден','Возможно, создатель удалил его или ссылка неполная.');
   const version=routeVersion;
@@ -249,7 +254,7 @@ async function startPage(quiz, preview=false) {
   const questionTotal = quiz.questionTotal ?? quiz.questions.length;
   const total = quiz.settings.questionCount ?? questionTotal;
   state.startSelection = allowsQuestionRange(quiz) && questionTotal ? {id:quiz.id,total:questionTotal,ranges:[{from:1,to:questionTotal}],mode:'range',count:Math.min(30,questionTotal)} : null;
-  setContent(`<main id="main" class="page narrow">${preview?notice('Пробное прохождение. Результат не попадёт в историю.','warning'):''}<section class="card start-card">${iconHTML(quiz.icon,"large")}${preview?'<div class="eyebrow">Предпросмотр</div>':''}<h1>${h(quiz.title)}</h1>${quiz.description?`<p class="muted pre">${h(quiz.description)}</p>`:''}<div class="start-summary"><span class="eyebrow">В этой попытке</span><b id="start-question-count">${total} вопросов</b><small id="start-question-note">${total<questionTotal?`случайно из ${questionTotal}`:'все вопросы теста'}</small></div>${state.startSelection?questionRangeControls():''}${state.savedAttempt?`<p class="muted small">Отвечено ${answeredQuestionCount(state.savedAttempt)} из ${state.savedAttempt.questions.length}${state.savedAttempt.questionRange?` · ${h(rangeLabel(state.savedAttempt))}`:''}</p>${btn('Продолжить','resume-attempt','primary large',`data-id="${h(quiz.id)}"`)} `:''}${btn(state.savedAttempt?'Начать заново':'Начать прохождение',preview?'start-preview':'start-test','primary large',`id="start-attempt" data-id="${h(quiz.id)}"`)}${preview?`<div class="mt">${routeLink('Вернуться в конструктор',`/edit/${quiz.id}`)}</div>`:''}</section></main>`);
+  setContent(`<main id="main" class="page narrow">${preview?notice('Пробное прохождение. Результат не попадёт в историю.','warning'):''}<section class="card start-card">${iconHTML(quiz.icon,"large")}${preview?'<div class="eyebrow">Предпросмотр</div>':''}<h1>${h(quiz.title)}</h1>${quiz.description?`<p class="muted pre">${h(quiz.description)}</p>`:''}<div class="start-summary"><span class="eyebrow">В этой попытке</span><b id="start-question-count">${total} вопросов</b><small id="start-question-note">${total<questionTotal?`случайно из ${questionTotal}`:'все вопросы теста'}</small></div>${state.startSelection?questionRangeControls():''}${secondChanceControls(saved)}${state.savedAttempt?`<p class="muted small">${h(attemptProgressLabel(state.savedAttempt))}${state.savedAttempt.questionRange?` · ${h(rangeLabel(state.savedAttempt))}`:''}</p>${btn('Продолжить','resume-attempt','primary large',`data-id="${h(quiz.id)}"`)} `:''}${btn(state.savedAttempt?'Начать заново':'Начать прохождение',preview?'start-preview':'start-test','primary large',`id="start-attempt" data-id="${h(quiz.id)}"`)}${preview?`<div class="mt">${routeLink('Вернуться в конструктор',`/edit/${quiz.id}`)}</div>`:''}</section></main>`);
   if (state.startSelection) syncQuestionRange();
 }
 
@@ -304,11 +309,13 @@ function updateQuestionRange(input,commit=false) {
   }
   range[bound]=value;syncQuestionRange(commit||input.type==='range'?null:input);
 }
-function selectionQuery(r){
-  if(!r)return '';
-  if(r.mode==='random')return `?mode=random&count=${r.count}`;
-  if(r.ranges)return `?ranges=${r.ranges.map(r=>`${r.from}-${r.to}`).join(',')}`;
-  return `?from=${r.from}&to=${r.to}`;
+function selectionQuery(r,secondChance=false){
+  const params=new URLSearchParams();
+  if(r?.mode==='random'){params.set('mode','random');params.set('count',r.count);}
+  else if(r?.ranges)params.set('ranges',r.ranges.map(r=>`${r.from}-${r.to}`).join(','));
+  else if(r){params.set('from',r.from);params.set('to',r.to);}
+  if(secondChance)params.set('secondChance','1');
+  return params.size?'?'+params.toString():'';
 }
 function rangeLabel(result) {
   const r=result.questionRange;if(!r)return '';
@@ -327,39 +334,44 @@ function closeRestartMenu() {
   restartMenuAttempt=null;
   const menu=document.querySelector('#restart-menu');if(menu)menu.hidden=true;
   document.querySelector('[data-action=restart-attempt]')?.setAttribute('aria-expanded','false');
-  if(state.attempt===a&&!a.done){a.checking=false;if(a.answers[a.index]===a.questions[a.index].correctOptionId)a.advance=setTimeout(()=>nextQuestion().catch(reportError),CONFIG.correctDelay);}
+  if(state.attempt===a&&!a.done){a.checking=false;scheduleAutomaticAdvance(a);}
 }
 document.addEventListener('keydown',event=>{if(event.key==='Escape'&&restartMenuAttempt){closeRestartMenu();document.querySelector('[data-action=restart-attempt]')?.focus();}});
 
 function playerFeedbackHTML(a) {
-  const q=a.questions[a.index],selected=a.answers[a.index],answered=selected!==undefined,correct=selected===q.correctOptionId;
+  const q=a.questions[a.index],selected=currentAnswers(a)[a.index],answered=selected!==undefined,correct=selected===q.correctOptionId;
+  const nextLabel=a.queue.length>1?'Следующий вопрос →':
+    a.secondChance&&!isSecondRound(a)&&a.wrongOrder.length?'Второй шанс →':'Посмотреть результат';
   if(answered)return correct?'<span class="good-text">✓ Верно</span>':
-    `<span class="bad-text">Неверно</span>${btn(a.queue.length===1?'Посмотреть результат':'Следующий вопрос →','next-question','primary large')}`;
+    `<span class="bad-text">Неверно</span>${btn(nextLabel,'next-question','primary large')}`;
   return `<span class="muted small">${a.checking?'Проверяем доступность теста…':''}</span>${btn('Отложить вопрос','defer-question','',a.queue.length<2||a.checking||a.blocked?'disabled':'')}`;
 }
 function playerQuestionHTML(a) {
-  const q=a.questions[a.index],selected=a.answers[a.index],answered=selected!==undefined,correct=selected===q.correctOptionId;
+  if(a.round==='second-intro')return '<div class="second-chance-intro" role="status"><h2>Второй шанс</h2></div>';
+  const q=a.questions[a.index],selected=currentAnswers(a)[a.index],answered=selected!==undefined,correct=selected===q.correctOptionId;
   return `<h2>${h(q.text)}</h2>${q.options.map((o,i)=>`<button class="answer ${answered&&o.id===q.correctOptionId?'good':''} ${answered&&o.id===selected&&!correct?'bad':''}" data-action="answer" data-id="${h(o.id)}" ${answered||a.checking||a.blocked?'disabled':''}><span class="letter">${i<26?String.fromCharCode(65+i):i+1}</span><span class="answer-text">${h(o.text)}</span>${answered&&o.id===q.correctOptionId?'<span class="answer-tag">✓ Правильный ответ</span>':''}${answered&&o.id===selected&&!correct?'<span class="answer-tag">✕ Ваш ответ</span>':''}</button>`).join('')}<div class="feedback ${playerPrefs.side==='left'?'feedback-left':''}" aria-live="polite">${playerFeedbackHTML(a)}</div>`;
 }
 function playerHeadingHTML(a) {
   const q=a.questions[a.index],deferred=a.deferred.includes(a.index);
-  const deferredCount=a.deferred.length-(deferred&&a.answers[a.index]!==undefined?1:0);
-  return `<div><div class="eyebrow">${h(a.quiz.title)}</div><h1>Отвечено ${answeredQuestionCount(a)} из ${a.questions.length}</h1><div class="quiz-heading-meta muted small"><span>№${q.originalIndex??a.index+1} в общем списке${a.questionRange?` · ${h(rangeLabel(a))}`:''}</span>${deferred?'<span class="pill">Отложенный</span>':''}${deferredCount?`<span>Отложено: ${deferredCount}</span>`:''}</div></div><span class="pill">◷ <span id="elapsed">${formatDuration(elapsedAttempt(a))}</span></span>`;
+  const deferredCount=a.deferred.length-(deferred&&currentAnswers(a)[a.index]!==undefined?1:0);
+  const meta=a.round==='second-intro'?`Ошибочных вопросов: ${a.wrongOrder.length}`:
+    `№${q.originalIndex??a.index+1} в общем списке${a.questionRange?` · ${h(rangeLabel(a))}`:''}`;
+  return `<div><div class="eyebrow">${h(a.quiz.title)}</div><h1>${attemptProgressLabel(a)}</h1><div class="quiz-heading-meta muted small"><span>${meta}</span>${deferred?'<span class="pill">Отложенный</span>':''}${deferredCount?`<span>Отложено: ${deferredCount}</span>`:''}</div></div><span class="pill">◷ <span id="elapsed">${formatDuration(elapsedAttempt(a))}</span></span>`;
 }
 function playerNoticesHTML(a){return `${a.saveError?notice(h(a.saveError)+' Прогресс пока не сохранён.','error'):''}${a.preview?notice('Предпросмотр · без записи в историю','warning'):''}${a.blocked?notice(`${h(a.blocked)} ${btn('Проверить соединение','retry-status','compact')}`,'error'):''}`;}
 
 function playPage() {
   const a=state.attempt;
   if (!a) return;
-  const q=a.questions[a.index], selected=a.answers[a.index], answered=selected!==undefined, correct=selected===q.correctOptionId;
+  const q=a.questions[a.index], selected=currentAnswers(a)[a.index], answered=selected!==undefined, correct=selected===q.correctOptionId;
   closeRestartMenu();
   const existing=document.querySelector('.quiz-page');
   if(existing?.dataset.attemptId===a.attemptId){
-    const card=existing.querySelector('.quiz-card'),sameQuestion=card.dataset.questionId===q.id;
+    const card=existing.querySelector('.quiz-card'),sameQuestion=card.dataset.questionId===q.id&&card.dataset.round===a.round;
     const scroll=sameQuestion?{x:window.scrollX,y:window.scrollY}:null;
     const notices=existing.querySelector('.player-notices'),noticeHTML=playerNoticesHTML(a);
     if(notices.innerHTML!==noticeHTML)notices.innerHTML=noticeHTML;
-    if(sameQuestion){
+    if(sameQuestion&&a.round!=='second-intro'){
       card.removeAttribute('aria-busy');
       for(const button of card.querySelectorAll('.answer')){
         const good=answered&&button.dataset.id===q.correctOptionId,bad=answered&&button.dataset.id===selected&&!correct;
@@ -371,34 +383,49 @@ function playPage() {
       }
       const feedback=card.querySelector('.feedback');feedback.classList.toggle('feedback-left',playerPrefs.side==='left');feedback.innerHTML=playerFeedbackHTML(a);
     }else{
-      card.outerHTML=`<section class="card quiz-card" data-question-id="${h(q.id)}">${playerQuestionHTML(a)}</section>`;
+      card.outerHTML=`<section class="card quiz-card" data-question-id="${h(q.id)}" data-round="${a.round}">${playerQuestionHTML(a)}</section>`;
     }
     existing.querySelector('.quiz-top').innerHTML=playerHeadingHTML(a);
     existing.querySelector('.progress').value=answeredQuestionCount(a);
+    existing.querySelector('.progress').max=roundQuestionTotal(a);
+    const finish=existing.querySelector('[data-action=finish-second]');
+    finish.hidden=!isSecondRound(a);finish.disabled=a.checking||!!a.blocked;
     const side=existing.querySelector('[data-action=player-side]');
     side.textContent=playerPrefs.side==='left'?'Кнопка: слева':'Кнопка: справа';
     side.setAttribute('aria-label',`Положение кнопки перехода: ${playerPrefs.side==='left'?'слева':'справа'}`);
-    document.title=`Отвечено ${answeredQuestionCount(a)} из ${a.questions.length} · Prosto Test`;
+    document.title=attemptProgressLabel(a)+' · Prosto Test';
     app.dispatchEvent(new Event('quiz-rendered'));
     if(scroll)window.scrollTo(scroll.x,scroll.y);return;
   }
-  setContent(`<main id="main" class="quiz-page" data-attempt-id="${h(a.attemptId)}"><div class="player-notices">${playerNoticesHTML(a)}</div><div class="quiz-top mt-sm">${playerHeadingHTML(a)}</div><progress class="progress" max="${a.questions.length}" value="${answeredQuestionCount(a)}" aria-label="Отвечено вопросов"></progress><section class="card quiz-card" data-question-id="${h(q.id)}">${playerQuestionHTML(a)}</section><div class="player-tools">${btn(playerPrefs.side==='left'?'Кнопка: слева':'Кнопка: справа','player-side','compact',`aria-label="Положение кнопки перехода: ${playerPrefs.side==='left'?'слева':'справа'}"`)}<div class="restart-control">${btn('Начать заново','restart-attempt','primary compact','aria-expanded="false" aria-controls="restart-menu"')}<div id="restart-menu" class="restart-menu card" hidden aria-label="Начать заново">${btn('С выбранными вопросами','restart-same','full')}${btn('С новыми вопросами','restart-new','full')}</div></div></div></main>`,'catalog',true);
+  setContent(`<main id="main" class="quiz-page" data-attempt-id="${h(a.attemptId)}"><div class="player-notices">${playerNoticesHTML(a)}</div><div class="quiz-top mt-sm">${playerHeadingHTML(a)}</div><progress class="progress" max="${roundQuestionTotal(a)}" value="${answeredQuestionCount(a)}" aria-label="Отвечено вопросов"></progress><section class="card quiz-card" data-question-id="${h(q.id)}" data-round="${a.round}">${playerQuestionHTML(a)}</section><div class="player-tools">${btn(playerPrefs.side==='left'?'Кнопка: слева':'Кнопка: справа','player-side','compact',`aria-label="Положение кнопки перехода: ${playerPrefs.side==='left'?'слева':'справа'}"`)}<div class="restart-control">${btn('Начать заново','restart-attempt','primary compact','aria-expanded="false" aria-controls="restart-menu"')}<div id="restart-menu" class="restart-menu card" hidden aria-label="Начать заново">${btn('С выбранными вопросами','restart-same','full')}${btn('С новыми вопросами','restart-new','full')}</div></div>${btn('Перейти к результату','finish-second','compact',`${isSecondRound(a)?'':'hidden'} ${a.checking||a.blocked?'disabled':''}`)}</div></main>`,'catalog',true);
 
 }
 
 function reviewCards(result) {
   const items=result.questions.map((q,i)=>({...q,number:i+1})).filter(q=>state.review==='all'||!q.correct);
   if (!items.length) return empty('Все ответы правильные','Вы прошли тест без ошибок.');
-  return items.map(q=>`<article class="card review-card"><div class="between"><span class="eyebrow">Вопрос ${q.number}${Number.isInteger(q.originalIndex)?` · №${q.originalIndex} в общем списке`:''}</span><span class="pill ${q.correct?'good':'bad'}">${q.correct?'Верно':'Ошибка'}</span></div><h3>${h(q.text)}</h3><div class="review-options">${q.options.map(o=>`<div class="review-option ${o.id===q.correctOptionId?'good':''} ${o.id===q.selectedOptionId&&!q.correct?'bad':''}"><span class="pre grow">${h(o.text)}</span>${o.id===q.selectedOptionId?`<span class="pill ${q.correct?'good':'bad'}">Ваш ответ</span>`:''}${o.id===q.correctOptionId?'<span class="pill good">Правильный</span>':''}</div>`).join('')}</div></article>`).join('');
+  return items.map(q=>`<article class="card review-card"><div class="between wrap"><span class="eyebrow">Вопрос ${q.number}${Number.isInteger(q.originalIndex)?` · №${q.originalIndex} в общем списке`:''}</span><span class="pill ${q.correct?'good':'bad'}">${q.correct?'Верно':'Ошибка'}</span>${q.retryOptionId?`<span class="pill ${q.retryCorrect?'good':'bad'}">${q.retryCorrect?'Исправлен со второй попытки':'Повторно неверно'}</span>`:''}</div><h3>${h(q.text)}</h3><div class="review-options">${q.options.map(o=>reviewOptionHTML(q,o,!!result.secondChance)).join('')}</div></article>`).join('');
+}
+function secondChanceSummaryHTML(result) {
+  const retry=result.secondChance;
+  if(!retry)return '';
+  if(!retry.total)return '<section class="card second-chance-result"><h2>Второй шанс</h2><p class="muted">Ошибок для повторения нет.</p></section>';
+  return `<section class="card second-chance-result"><h2>Второй шанс</h2><div class="facts"><div class="fact"><b>${retry.correct} из ${retry.total}</b><small>исправлено со второй попытки</small></div><div class="fact"><b>${retry.remaining}</b><small>осталось ошибок</small></div><div class="fact"><b>${retry.answered} из ${retry.total}</b><small>повторно отвечено</small></div></div></section>`;
+}
+function reviewOptionHTML(question,option,secondChance) {
+  const first=option.id===question.selectedOptionId,retry=option.id===question.retryOptionId;
+  const correct=option.id===question.correctOptionId;
+  const bad=(first&&!question.correct)||(retry&&!question.retryCorrect);
+  return `<div class="review-option ${correct?'good':''} ${bad?'bad':''}"><span class="pre grow">${h(option.text)}</span>${first?`<span class="pill ${question.correct?'good':'bad'}">${secondChance?'Первый ответ':'Ваш ответ'}</span>`:''}${retry?`<span class="pill ${question.retryCorrect?'good':'bad'}">Второй ответ</span>`:''}${correct?'<span class="pill good">Правильный</span>':''}</div>`;
 }
 function resultPage(result, preview=false) {
   if (!result) return unavailable('Результат не найден','Он мог быть удалён вместе с данными браузера или сохранён на другом устройстве.');
   state.result=result;
-  setContent(`<main id="main" class="page"><div class="eyebrow">${preview?'Пробная попытка':'Попытка завершена'}</div><h1>Результат теста</h1>${result.saveError?notice(h(result.saveError)+' Результат виден в этой вкладке, но не сохранён в историю.','error'):''}<div class="result-layout mt"><section><div class="card result-hero"><div class="between wrap"><div><div class="row">${iconHTML(result.icon)}<h2 class="no-margin">${h(result.title)}</h2></div>${result.questionRange?`<p class="muted small">${rangeLabel(result)}</p>`:''}<span class="muted small">${h(date(result.finishedAt))}</span></div><div class="score">${result.percent}%</div></div><div class="facts"><div class="fact"><b>${result.correct} из ${result.total}</b><small>правильных ответов</small></div><div class="fact"><b>${result.wrong}</b><small>неправильных ответов</small></div><div class="fact"><b>${formatDuration(result.durationMs)}</b><small>время прохождения</small></div></div></div><div class="between wrap mt"><h2>Разбор ответов</h2><div class="tabs"><button class="${state.review==='all'?'active':''}" data-action="review-filter" data-filter="all">Все · ${result.total}</button><button class="${state.review==='wrong'?'active':''}" data-action="review-filter" data-filter="wrong">Ошибки · ${result.wrong}</button></div></div><div id="review-list">${reviewCards(result)}</div></section><aside class="card result-aside"><h3>Продолжить обучение</h3>${preview?routeLink('В конструктор',`/edit/${result.quizId}`,'primary full'):routeLink('Пройти снова',`/test/${result.quizId}`,'primary full')}${preview?'':routeLink('История попыток','/history','full mt-sm')}</aside></div></main>`,'history');
+  setContent(`<main id="main" class="page"><div class="eyebrow">${preview?'Пробная попытка':'Попытка завершена'}</div><h1>Результат теста</h1>${result.saveError?notice(h(result.saveError)+' Результат виден в этой вкладке, но не сохранён в историю.','error'):''}<div class="result-layout mt"><section><div class="card result-hero"><div class="between wrap"><div><div class="row">${iconHTML(result.icon)}<h2 class="no-margin">${h(result.title)}</h2></div>${result.questionRange?`<p class="muted small">${rangeLabel(result)}</p>`:''}<span class="muted small">${h(date(result.finishedAt))}</span></div><div class="score">${result.percent}%</div></div><div class="facts"><div class="fact"><b>${result.correct} из ${result.total}</b><small>${result.secondChance?'правильных с первой попытки':'правильных ответов'}</small></div><div class="fact"><b>${result.wrong}</b><small>${result.secondChance?'ошибок с первой попытки':'неправильных ответов'}</small></div><div class="fact"><b>${formatDuration(result.durationMs)}</b><small>время прохождения</small></div></div></div>${secondChanceSummaryHTML(result)}<div class="between wrap mt"><h2>Разбор ответов</h2><div class="tabs"><button class="${state.review==='all'?'active':''}" data-action="review-filter" data-filter="all">Все · ${result.total}</button><button class="${state.review==='wrong'?'active':''}" data-action="review-filter" data-filter="wrong">Ошибки · ${result.wrong}</button></div></div><div id="review-list">${reviewCards(result)}</div></section><aside class="card result-aside"><h3>Продолжить обучение</h3>${preview?routeLink('В конструктор',`/edit/${result.quizId}`,'primary full'):routeLink('Пройти снова',`/test/${result.quizId}`,'primary full')}${preview?'':routeLink('История попыток','/history','full mt-sm')}</aside></div></main>`,'history');
 }
 function historyPage() {
   const attempts=[...state.attempts].sort((a,b)=>b.finishedAt-a.finishedAt);
-  setContent(`<main id="main" class="page"><div class="eyebrow">На этом устройстве</div><h1>История попыток</h1>${storageNotice()}${attempts.length?`<div class="card table-wrap mt"><table class="history-table"><thead><tr><th>Тест</th><th>Дата</th><th>Результат</th><th>Время</th><th><span class="sr-only">Действие</span></th></tr></thead><tbody>${attempts.map(r=>`<tr><td><div class="row">${iconHTML(r.icon,"small")}<b>${h(r.title)}</b></div>${r.questionRange?`<div class="muted small mt-sm">${rangeLabel(r)}</div>`:''}</td><td>${h(date(r.finishedAt))}</td><td><span class="pill ${r.percent>=70?'good':'warn'}">${r.correct} из ${r.total} · ${r.percent}%</span></td><td>${formatDuration(r.durationMs)}</td><td>${routeLink('Посмотреть',`/result/${r.id}`)}</td></tr>`).join('')}</tbody></table></div>`:empty('История пока пуста','Пройдите любой доступный тест — результат появится здесь.',routeLink('Выбрать тест','/catalog','primary'))}<div class="notice mt">Закрытие браузера и перезагрузка компьютера не удаляют историю. Она хранится в этом браузере и профиле, без синхронизации с другими устройствами. Очистка данных сайта удалит её; в приватном режиме она исчезнет после закрытия окна.</div></main>`,'history');
+  setContent(`<main id="main" class="page"><div class="eyebrow">На этом устройстве</div><h1>История попыток</h1>${storageNotice()}${attempts.length?`<div class="card table-wrap mt"><table class="history-table"><thead><tr><th>Тест</th><th>Дата</th><th>Результат</th><th>Время</th><th><span class="sr-only">Действие</span></th></tr></thead><tbody>${attempts.map(r=>`<tr><td><div class="row">${iconHTML(r.icon,"small")}<b>${h(r.title)}</b></div>${r.questionRange?`<div class="muted small mt-sm">${rangeLabel(r)}</div>`:''}</td><td>${h(date(r.finishedAt))}</td><td><span class="pill ${r.percent>=70?'good':'warn'}">${r.correct} из ${r.total} · ${r.percent}%</span>${r.secondChance?`<div class="muted small mt-sm">Второй шанс · исправлено ${r.secondChance.correct} из ${r.secondChance.total}</div>`:''}</td><td>${formatDuration(r.durationMs)}</td><td>${routeLink('Посмотреть',`/result/${r.id}`)}</td></tr>`).join('')}</tbody></table></div>`:empty('История пока пуста','Пройдите любой доступный тест — результат появится здесь.',routeLink('Выбрать тест','/catalog','primary'))}<div class="notice mt">Закрытие браузера и перезагрузка компьютера не удаляют историю. Она хранится в этом браузере и профиле, без синхронизации с другими устройствами. Очистка данных сайта удалит её; в приватном режиме она исчезнет после закрытия окна.</div></main>`,'history');
 }
 
 function showDialog(title, body, actions='') {
@@ -600,19 +627,42 @@ function saveProgress(a=state.attempt) {
 async function discardProgress(id,preview=false) {await progressQueue;await db.remove('activeAttempts',activeAttemptKey(id,preview));}
 async function beginAttempt(quiz,preview=false,range=null,prepared=null) {
   const version=routeVersion;
-  const saved=prepared?prepared.saved??null:await readProgress(quiz.id,preview);
+  let saved=prepared?.saved;
+  if(prepared?.questions)saved=null;
+  else if(saved===undefined)saved=await readProgress(quiz.id,preview);
   if(version!==routeVersion)return;
   const errors=quizErrors(saved?.quiz??quiz);if(errors.length){showErrors(errors);return;}
   stopAttempt();
   const questionRange=saved?.questionRange??(allowsQuestionRange(quiz)?normalizeQuestionRange(quiz.questions.length,range??{}):null);
   state.attempt={...(saved??{}),attemptId:saved?.attemptId??uid(),quiz:clone(saved?.quiz??quiz),questionRange,questions:prepared?.questions??saved?.questions??prepareQuestions(quiz,Math.random,questionRange),answers:saved?.answers??[],index:saved?.index??0,startedAt:saved?.startedAt??Date.now(),elapsedMs:saved?.elapsedMs??0,activeSince:document.hidden?null:performance.now(),lastCheck:Date.now(),preview,blocked:'',saveError:'',checking:false,done:false,timer:null,advance:null,poll:null};
   const a=state.attempt;
-  Object.assign(a,restoreQuestionQueue(a));
+  Object.assign(a,restoreQuestionQueue(a),restoreSecondChance(saved??{secondChance:prepared?.secondChance??false}));
   a.progressInitialized=!!saved;
   a.timer=setInterval(()=>{const elapsed=document.querySelector('#elapsed');if(elapsed)elapsed.textContent=formatDuration(elapsedAttempt(a));if(!document.hidden)saveProgress(a);},1000);
   if(!preview)a.poll=setInterval(()=>checkAccess(a).catch(error=>{if(state.attempt===a){a.blocked=errorMessage(error);playPage();}}),CONFIG.statusInterval);
   await saveProgress(a);
-  if(state.attempt===a&&a.answers[a.index]===a.questions[a.index].correctOptionId)a.advance=setTimeout(()=>nextQuestion().catch(reportError),CONFIG.correctDelay);
+  scheduleAutomaticAdvance(a);
+}
+function scheduleAutomaticAdvance(a) {
+  clearTimeout(a.advance);
+  if(state.attempt!==a||a.done||a.checking||a.blocked)return;
+  if(a.round==='second-intro')a.advance=setTimeout(()=>enterSecondRound(a),1500);
+  else if(currentAnswers(a)[a.index]===a.questions[a.index].correctOptionId){
+    a.advance=setTimeout(()=>nextQuestion().catch(reportError),CONFIG.correctDelay);
+  }
+}
+async function enterSecondRound(a) {
+  if(state.attempt!==a||a.done||a.checking||a.blocked||a.round!=='second-intro')return;
+  a.checking=true;
+  try {
+    if(!(await checkAccess(a)))return;
+    a.round='second';
+    await saveProgress(a);
+    if(state.attempt!==a)return;
+    a.checking=false;playPage();window.scrollTo(0,0);
+  }catch(error){
+    if(state.attempt===a){a.checking=false;a.blocked=errorMessage(error);playPage();}
+  }
 }
 function stopAttempt() {const a=state.attempt;if(a){clearInterval(a.timer);clearInterval(a.poll);clearTimeout(a.advance);}state.attempt=null;}
 async function checkAccess(a,force=false) {
@@ -634,24 +684,22 @@ async function checkAccess(a,force=false) {
 }
 
 async function chooseAnswer(optionId) {
-  const a=state.attempt;if(!a||a.done||a.checking||a.blocked||a.answers[a.index]!==undefined)return;
+  const a=state.attempt;if(!a||a.done||a.checking||a.blocked||a.round==='second-intro'||currentAnswers(a)[a.index]!==undefined)return;
   a.checking=true;
-  document.querySelectorAll('.answer').forEach(button=>button.disabled=true);
-  const deferButton=document.querySelector('[data-action=defer-question]');
-  if(deferButton)deferButton.disabled=true;
+  document.querySelectorAll('.answer,[data-action=defer-question],[data-action=finish-second]').forEach(button=>button.disabled=true);
   document.querySelector('.quiz-card')?.setAttribute('aria-busy','true');
   try {
     if(!(await checkAccess(a,a.queue.length===1)))return;
     const q=a.questions[a.index];if(!q.options.some(o=>o.id===optionId))return;
-    a.answers[a.index]=optionId;await saveProgress(a);if(state.attempt!==a)return;a.checking=false;playPage();
-    if(optionId===q.correctOptionId)a.advance=setTimeout(()=>nextQuestion().catch(reportError),CONFIG.correctDelay);
+    recordAttemptAnswer(a,optionId);await saveProgress(a);if(state.attempt!==a)return;a.checking=false;playPage();
+    scheduleAutomaticAdvance(a);
   } catch(error){if(state.attempt===a){a.blocked=errorMessage(error);a.checking=false;playPage();}}
 }
 async function postponeQuestion() {
   const a=state.attempt;
-  if(!a||a.done||a.checking||a.blocked||a.answers[a.index]!==undefined||a.queue.length<2)return;
+  if(!a||a.done||a.checking||a.blocked||a.round==='second-intro'||currentAnswers(a)[a.index]!==undefined||a.queue.length<2)return;
   a.checking=true;
-  document.querySelectorAll('.answer,[data-action=defer-question]').forEach(button=>button.disabled=true);
+  document.querySelectorAll('.answer,[data-action=defer-question],[data-action=finish-second]').forEach(button=>button.disabled=true);
   document.querySelector('.quiz-card')?.setAttribute('aria-busy','true');
   try {
     if(!(await checkAccess(a)))return;
@@ -663,14 +711,23 @@ async function postponeQuestion() {
     if(state.attempt===a){a.blocked=errorMessage(error);a.checking=false;playPage();}
   }
 }
-async function nextQuestion() {
-  const a=state.attempt;if(!a||a.done||a.checking||a.answers[a.index]===undefined)return;
+async function nextQuestion(finishSecond=false) {
+  const a=state.attempt;
+  if(!a||a.done||a.checking||a.blocked)return;
+  if(finishSecond){
+    if(!isSecondRound(a))return;
+  }else if(a.round==='second-intro'||currentAnswers(a)[a.index]===undefined)return;
   clearTimeout(a.advance);a.checking=true;
+  document.querySelector('[data-action=finish-second]').disabled=true;
+  a.finishRequested=finishSecond;
   try {
-    if(!(await checkAccess(a,a.queue.length===1)))return;
-    if(advanceQuestionQueue(a)){await saveProgress(a);if(state.attempt!==a)return;a.checking=false;playPage();window.scrollTo(0,0);return;}
+    if(!(await checkAccess(a,finishSecond||a.queue.length===1)))return;
+    if(!finishSecond&&(advanceQuestionQueue(a)||beginSecondChance(a))){
+      await saveProgress(a);if(state.attempt!==a)return;
+      a.checking=false;playPage();scheduleAutomaticAdvance(a);window.scrollTo(0,0);return;
+    }
     a.done=true;
-    pauseAttempt(a);const result=makeResult(a.quiz,a.questions,a.answers,a.startedAt,Date.now(),a.questionRange);result.durationMs=a.elapsedMs;result.id=a.attemptId;
+    pauseAttempt(a);const result=addSecondChanceResult(makeResult(a.quiz,a.questions,a.answers,a.startedAt,Date.now(),a.questionRange),a);result.durationMs=a.elapsedMs;result.id=a.attemptId;
     await progressQueue;
     if(!a.preview){await completeAttempt(result,activeAttemptKey(a.quiz.id));state.attempts=state.attempts.filter(r=>r.id!==result.id);state.attempts.push(result);}
     else await discardProgress(a.quiz.id,true);
@@ -680,7 +737,7 @@ async function nextQuestion() {
   } catch(error){if(state.attempt===a){a.done=false;a.blocked=errorMessage(error);a.checking=false;playPage();}}
 }
 
-async function openPublicTest(section,id,version,range=null) {
+async function openPublicTest(section,id,version,range=null,secondChance=false) {
   const loading = section==='run' ? 'Загружаем вопросы…' : 'Проверяем доступность теста…';
   setContent(`<main id="main" class="loading" role="status">${loading}</main>`);
   try {
@@ -700,7 +757,7 @@ async function openPublicTest(section,id,version,range=null) {
     if(version!==routeVersion)return;
     const quiz=saved?.quiz??await loadPublicQuiz(entry);
     if(version!==routeVersion)return;
-    await beginAttempt(quiz,false,range,{saved});
+    await beginAttempt(quiz,false,range,{saved,secondChance});
     if(version===routeVersion&&state.attempt)playPage();
   } catch(error) {
     if(version===routeVersion)unavailable('Не удалось открыть тест',errorMessage(error),true);
@@ -763,12 +820,12 @@ async function route() {
     if(!state.attempt){
       const range=params.has('ranges')?{ranges:params.get('ranges').split(',').map(part=>{const [from,to]=part.split('-');return {from,to};})}:{mode:params.get('mode'),count:params.get('count'),from:params.get('from'),to:params.get('to')};
       if(section==='run'){
-        await openPublicTest(section,id,version,range);
+        await openPublicTest(section,id,version,range,params.get('secondChance')==='1');
       }else{
         const quiz=await getDraft(id);
         if(version!==routeVersion)return;
         if(!quiz){await startPage(null);return;}
-        await beginAttempt(quiz,true,range);
+        await beginAttempt(quiz,true,range,{secondChance:params.get('secondChance')==='1'});
         if(version===routeVersion&&state.attempt)playPage();
       }
     }else if(version===routeVersion){
@@ -815,12 +872,12 @@ async function handleAction(action,element,event={}) {
       }
       const questions=shuffle(clone(a.questions)).map(q=>({...q,options:a.quiz.settings.shuffleOptions?shuffle(q.options):q.options}));
       a.done=true;stopAttempt();closeRestartMenu();
-      await beginAttempt(a.quiz,a.preview,a.questionRange,{questions});playPage();window.scrollTo(0,0);
+      await beginAttempt(a.quiz,a.preview,a.questionRange,{questions,secondChance:a.secondChance});playPage();window.scrollTo(0,0);
     }catch(error){buttons.forEach(b=>b.disabled=false);closeRestartMenu();throw error;}
     return;
   }
   if(action==='resume-attempt'){
-    const saved=state.savedAttempt;if(!saved)return;const r=saved.questionRange;location.hash=link(`/${saved.preview?'run-preview':'run'}/${id}${selectionQuery(r)}`);return;
+    const saved=state.savedAttempt;if(!saved)return;const r=saved.questionRange;location.hash=link(`/${saved.preview?'run-preview':'run'}/${id}${selectionQuery(r,saved.secondChance)}`);return;
   }
   if(action==='header-animation'){
     setHeaderAnimation(!headerAnimationEnabled());
@@ -925,14 +982,20 @@ async function handleAction(action,element,event={}) {
   if(action==='start-test'||action==='start-preview'){
     if(state.savedAttempt){if(!(await ask('Начать заново?','Прогресс этой незавершённой попытки будет удалён.','Начать заново')))return;await discardProgress(id,action==='start-preview');state.savedAttempt=null;}
     const r=state.startSelection?.id===id?state.startSelection:null;
-    location.hash=link(`/${action==='start-preview'?'run-preview':'run'}/${id}${selectionQuery(r)}`);return;
+    location.hash=link(`/${action==='start-preview'?'run-preview':'run'}/${id}${selectionQuery(r,document.querySelector('#second-chance').checked)}`);return;
   }
   if(action==='answer'){await chooseAnswer(id);return;}
   if(action==='defer-question'){await postponeQuestion();return;}
   if(action==='next-question'){await nextQuestion();return;}
+  if(action==='finish-second'){await nextQuestion(true);return;}
   if(action==='retry-status'){
     const a=state.attempt;if(!a)return;
-    if(await checkAccess(a)){a.checking=false;playPage();if(a.answers[a.index]!==undefined){if(a.answers[a.index]===a.questions[a.index].correctOptionId)await nextQuestion();}}return;
+    if(await checkAccess(a)){
+      a.checking=false;playPage();
+      if(a.finishRequested)await nextQuestion(true);
+      else if(a.round==='second-intro')await enterSecondRound(a);
+      else scheduleAutomaticAdvance(a);
+    }return;
   }
   if(action==='review-filter'){state.review=element.dataset.filter;resultPage(state.result,state.route.startsWith('/preview-result'));return;}
 }

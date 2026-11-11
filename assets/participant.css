@@ -17,3 +17,15 @@
 .review-card{content-visibility:auto;contain-intrinsic-size:auto 480px}
 
 .quiz-heading-meta{display:flex;align-items:center;gap:6px 12px;flex-wrap:wrap}
+
+.second-chance-option{margin:24px 0;text-align:left}
+.second-chance-option small{display:block;margin-top:5px;color:var(--muted);font-weight:400;line-height:1.5}
+.second-chance-intro{display:grid;place-items:center;min-height:200px;text-align:center}
+.quiz-card .second-chance-intro h2{margin:0;color:var(--accent)}
+.second-chance-result{margin-top:20px;padding:22px}
+.second-chance-result h2{margin:0}
+.second-chance-result .facts{margin:18px 0 0}
+.quiz-page>.player-tools>[hidden]{display:none}
+.review-option{flex-wrap:wrap}
+.review-option>.grow{min-width:160px}
+@media(max-width:760px){.player-tools>[data-action=finish-second]{flex-basis:100%}.second-chance-result{padding:18px}}

@@ -38,6 +38,8 @@ async function getActiveAttempt(id) {
       resolve(saved&&checkpoint?.attemptId===saved.attemptId?{
         ...saved,answers:checkpoint.answers,index:checkpoint.index,elapsedMs:checkpoint.elapsedMs,
         queue:checkpoint.queue,deferred:checkpoint.deferred,
+        secondChance:checkpoint.secondChance,round:checkpoint.round,
+        retryAnswers:checkpoint.retryAnswers,wrongOrder:checkpoint.wrongOrder,
       }:saved);
     };
     tx.onerror=tx.onabort=()=>reject(new Error('Не удалось восстановить сохранённую попытку.'));
