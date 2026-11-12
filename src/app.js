@@ -11,13 +11,14 @@ import { db, openDB, putActiveProgress, completeAttempt, requestPersistentStorag
 import { GitHub, loadPublicCatalog, loadPublicIndex, loadPublicQuiz, loadPublicStatus } from './github.js';
 import { iconHTML, normalizeIcon } from './icons.js';
 import { openIconEditor } from './icon-editor.js';
+import { openQuestionBrowser, closeQuestionBrowser } from './question-browser.js';
 import { hasRememberedToken, hasVaultSession, rememberToken, restoreToken, forgetToken } from './token-vault.js';
 import { isCreatorUnlocked, isCreatorRoute, unlockCreator, lockCreator } from './creator.js';
 
 const app = document.querySelector('#app');
 const dialog = document.querySelector('#dialog');
 let github = new GitHub();
-const state = {publicIndex:null, creatorCatalog:null, remote:null, drafts:[], attempts:[], publicError:'', githubError:'', storageError:'', editor:null, selected:null, startSelection:null, route:'', attempt:null, result:null, busy:false, filter:'all', search:'', review:'all', saving:false, saveError:'', unsaved:false};
+const state = {publicIndex:null, creatorCatalog:null, remote:null, drafts:[], attempts:[], publicError:'', githubError:'', storageError:'', editor:null, selected:null, startSelection:null, startQuiz:null, route:'', attempt:null, result:null, busy:false, filter:'all', search:'', review:'all', saving:false, saveError:'', unsaved:false};
 const selection={quizId:null,mode:false,ids:new Set(),anchor:null};
 const mobileMedia=matchMedia('(max-width: 760px)');
 const mobileView=()=>mobileMedia.matches;
@@ -251,10 +252,11 @@ async function startPage(quiz, preview=false) {
   }
   const saved=await readProgress(quiz.id,preview);if(version!==routeVersion)return;
   state.savedAttempt=saved;
+  state.startQuiz={quiz,preview};
   const questionTotal = quiz.questionTotal ?? quiz.questions.length;
   const total = quiz.settings.questionCount ?? questionTotal;
   state.startSelection = allowsQuestionRange(quiz) && questionTotal ? {id:quiz.id,total:questionTotal,ranges:[{from:1,to:questionTotal}],mode:'range',count:Math.min(30,questionTotal)} : null;
-  setContent(`<main id="main" class="page narrow">${preview?notice('Пробное прохождение. Результат не попадёт в историю.','warning'):''}<section class="card start-card">${iconHTML(quiz.icon,"large")}${preview?'<div class="eyebrow">Предпросмотр</div>':''}<h1>${h(quiz.title)}</h1>${quiz.description?`<p class="muted pre">${h(quiz.description)}</p>`:''}<div class="start-summary"><span class="eyebrow">В этой попытке</span><b id="start-question-count">${total} вопросов</b><small id="start-question-note">${total<questionTotal?`случайно из ${questionTotal}`:'все вопросы теста'}</small></div>${state.startSelection?questionRangeControls():''}${secondChanceControls(saved)}${state.savedAttempt?`<p class="muted small">${h(attemptProgressLabel(state.savedAttempt))}${state.savedAttempt.questionRange?` · ${h(rangeLabel(state.savedAttempt))}`:''}</p>${btn('Продолжить','resume-attempt','primary large',`data-id="${h(quiz.id)}"`)} `:''}${btn(state.savedAttempt?'Начать заново':'Начать прохождение',preview?'start-preview':'start-test','primary large',`id="start-attempt" data-id="${h(quiz.id)}"`)}${preview?`<div class="mt">${routeLink('Вернуться в конструктор',`/edit/${quiz.id}`)}</div>`:''}</section></main>`);
+  setContent(`<main id="main" class="page narrow">${preview?notice('Пробное прохождение. Результат не попадёт в историю.','warning'):''}<section class="card start-card">${iconHTML(quiz.icon,"large")}${preview?'<div class="eyebrow">Предпросмотр</div>':''}<h1>${h(quiz.title)}</h1>${quiz.description?`<p class="muted pre">${h(quiz.description)}</p>`:''}<div class="start-summary"><span class="eyebrow">В этой попытке</span><b id="start-question-count">${total} вопросов</b><small id="start-question-note">${total<questionTotal?`случайно из ${questionTotal}`:'все вопросы теста'}</small></div>${btn('Посмотреть все вопросы','browse-questions','full question-browser-launch',`data-id="${h(quiz.id)}"`)}${state.startSelection?questionRangeControls():''}${secondChanceControls(saved)}${state.savedAttempt?`<p class="muted small">${h(attemptProgressLabel(state.savedAttempt))}${state.savedAttempt.questionRange?` · ${h(rangeLabel(state.savedAttempt))}`:''}</p>${btn('Продолжить','resume-attempt','primary large',`data-id="${h(quiz.id)}"`)} `:''}${btn(state.savedAttempt?'Начать заново':'Начать прохождение',preview?'start-preview':'start-test','primary large',`id="start-attempt" data-id="${h(quiz.id)}"`)}${preview?`<div class="mt">${routeLink('Вернуться в конструктор',`/edit/${quiz.id}`)}</div>`:''}</section></main>`);
   if (state.startSelection) syncQuestionRange();
 }
 
@@ -429,12 +431,16 @@ function historyPage() {
 }
 
 function showDialog(title, body, actions='') {
+  closeQuestionBrowser();
   if (dialog.open) closeDialog();
   dialog.className='';
   dialog.innerHTML=`<div class="dialog-head"><h2 id="dialog-title">${title}</h2><button class="icon-btn" data-action="close-dialog" aria-label="Закрыть окно">×</button></div><div class="dialog-body">${body}</div>${actions?`<div class="dialog-actions">${actions}</div>`:''}`;
   dialog.showModal();
 }
-function closeDialog() { dialog.close(); dialog.innerHTML=''; if (confirmation) {confirmation(false);confirmation=null;} }
+function closeDialog() { closeQuestionBrowser(); dialog.close(); dialog.innerHTML=''; if (confirmation) {confirmation(false);confirmation=null;} }
+dialog.addEventListener('close',()=>{
+  if(!dialog.open){closeQuestionBrowser();dialog.innerHTML='';dialog.className='';}
+});
 dialog.addEventListener('cancel',event=>{if(connecting){event.preventDefault();return;}if(confirmation){confirmation(false);confirmation=null;}});
 function ask(title,body,confirmText='Подтвердить',danger=false) {
   showDialog(h(title),`<p>${h(body)}</p>`,btn('Отмена','close-dialog')+btn(h(confirmText),'confirm',danger?'danger':'primary'));
@@ -845,6 +851,23 @@ async function route() {
 function reportError(error) {toast(errorMessage(error));}
 async function handleAction(action,element,event={}) {
   const id=element?.dataset.id;
+  if(action==='browse-questions'){
+    const start=state.startQuiz;
+    if(!start||start.quiz.id!==id||!document.querySelector('#start-attempt'))return;
+    const selection=state.startSelection?clone(state.startSelection):null;
+    await openQuestionBrowser({
+      title:start.quiz.title,selection,showDialog,
+      loadQuiz:async()=>{
+        if(start.preview)return clone(start.quiz);
+        const index=await loadPublicIndex();
+        const entry=index.tests.find(quiz=>quiz.id===id);
+        if(!entry)throw new Error('Тест удалён. Вернитесь к списку тестов.');
+        if(entry.status==='closed')throw new Error('Создатель закрыл этот тест.');
+        return loadPublicQuiz(entry);
+      },
+    });
+    return;
+  }
   if(mobileView()&&new Set(['new','publish','toggle-status','delete','edit-icon','add-question','remove-question','add-option','remove-option','move-up','move-down','paste','paste-replace','apply-paste','paste-batch','apply-batch','copy','apply-copy','duplicate','selection-mode','selection-all','selection-clear','selection-range','selection-apply-range','toggle-question','selection-up','selection-down','selection-move','selection-move-apply','selection-move-end','selection-delete']).has(action)){toast('На телефоне доступен только просмотр.');return;}
   if(action==='mobile-question'){if(state.editor?.questions.some(q=>q.id===id)){state.selected=id;renderSelectedQuestion();document.querySelector('.mobile-question')?.scrollIntoView({block:'start'});}return;}
   if(action==='player-side'){
