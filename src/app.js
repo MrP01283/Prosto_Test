@@ -1041,6 +1041,10 @@ document.addEventListener('pointerdown',event=>{
 for(const event of ['pointerup','pointercancel'])document.addEventListener(event,()=>{numberStepperTarget=null;},true);
 document.addEventListener('keydown',event=>{
   if(['ArrowUp','ArrowDown'].includes(event.key)&&event.target.matches(quickNumberSelector))restoreNumberForStep(event.target);
+  if(event.key==='Enter'&&!event.isComposing&&event.target.matches('input[type=number][data-range-bound=from]')){
+    const end=event.target.closest('[data-range-row]')?.querySelector('input[type=number][data-range-bound=to]');
+    if(end&&!end.disabled){event.preventDefault();end.focus();}
+  }
 });
 document.addEventListener('focusin',event=>{
   const el=event.target;if(!el.matches(quickNumberSelector))return;
