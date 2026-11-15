@@ -6,7 +6,7 @@ import { uid, clone, shuffle, escapeHTML as h, normalize, newQuiz, newQuestion, 
 import { activeAttemptKey, elapsedAttempt, pauseAttempt, snapshotAttempt, snapshotProgress, validAttemptSnapshot } from './attempt-progress.js';
 import { restoreQuestionQueue, answeredQuestionCount, deferCurrentQuestion, advanceQuestionQueue,
   restoreSecondChance, isSecondRound, currentAnswers, roundQuestionTotal, attemptProgressLabel,
-  recordAttemptAnswer, beginSecondChance, addSecondChanceResult } from './question-queue.js';
+  recordAttemptAnswer, beginSecondChance, addSecondChanceResult, currentOptions } from './question-queue.js';
 import { db, openDB, putActiveProgress, completeAttempt, requestPersistentStorage } from './storage.js';
 import { GitHub, loadPublicCatalog, loadPublicIndex, loadPublicQuiz, loadPublicStatus } from './github.js';
 import { iconHTML, normalizeIcon } from './icons.js';
@@ -351,7 +351,7 @@ function playerFeedbackHTML(a) {
 function playerQuestionHTML(a) {
   if(a.round==='second-intro')return '<div class="second-chance-intro" role="status"><h2>Второй шанс</h2></div>';
   const q=a.questions[a.index],selected=currentAnswers(a)[a.index],answered=selected!==undefined,correct=selected===q.correctOptionId;
-  return `<h2>${h(q.text)}</h2>${q.options.map((o,i)=>`<button class="answer ${answered&&o.id===q.correctOptionId?'good':''} ${answered&&o.id===selected&&!correct?'bad':''}" data-action="answer" data-id="${h(o.id)}" ${answered||a.checking||a.blocked?'disabled':''}><span class="letter">${i<26?String.fromCharCode(65+i):i+1}</span><span class="answer-text">${h(o.text)}</span>${answered&&o.id===q.correctOptionId?'<span class="answer-tag">✓ Правильный ответ</span>':''}${answered&&o.id===selected&&!correct?'<span class="answer-tag">✕ Ваш ответ</span>':''}</button>`).join('')}<div class="feedback ${playerPrefs.side==='left'?'feedback-left':''}" aria-live="polite">${playerFeedbackHTML(a)}</div>`;
+  return `<h2>${h(q.text)}</h2>${currentOptions(a).map((o,i)=>`<button class="answer ${answered&&o.id===q.correctOptionId?'good':''} ${answered&&o.id===selected&&!correct?'bad':''}" data-action="answer" data-id="${h(o.id)}" ${answered||a.checking||a.blocked?'disabled':''}><span class="letter">${i<26?String.fromCharCode(65+i):i+1}</span><span class="answer-text">${h(o.text)}</span>${answered&&o.id===q.correctOptionId?'<span class="answer-tag">✓ Правильный ответ</span>':''}${answered&&o.id===selected&&!correct?'<span class="answer-tag">✕ Ваш ответ</span>':''}</button>`).join('')}<div class="feedback ${playerPrefs.side==='left'?'feedback-left':''}" aria-live="polite">${playerFeedbackHTML(a)}</div>`;
 }
 function playerHeadingHTML(a) {
   const q=a.questions[a.index],deferred=a.deferred.includes(a.index);

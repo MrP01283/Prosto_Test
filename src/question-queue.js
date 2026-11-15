@@ -1,3 +1,5 @@
+import {shuffle} from './core.js';
+
 // Questions and answers keep their original positions. Only this small queue moves.
 export function restoreQuestionQueue(attempt) {
   return {
@@ -36,6 +38,7 @@ export function restoreSecondChance(attempt) {
     round: attempt.round ?? 'first',
     retryAnswers: [...(attempt.retryAnswers ?? [])],
     wrongOrder: [...(attempt.wrongOrder ?? [])],
+    retryOptionOrder: (attempt.retryOptionOrder ?? []).map(order => [...order]),
   };
 }
 
@@ -45,6 +48,12 @@ export function isSecondRound(attempt) {
 
 export function currentAnswers(attempt) {
   return isSecondRound(attempt) ? attempt.retryAnswers : attempt.answers;
+}
+
+export function currentOptions(attempt) {
+  const options = attempt.questions[attempt.index].options;
+  const order = isSecondRound(attempt) ? attempt.retryOptionOrder?.[attempt.index] : null;
+  return order ? order.map(index => options[index]) : options;
 }
 
 export function roundQuestionTotal(attempt) {
@@ -67,12 +76,24 @@ export function recordAttemptAnswer(attempt, optionId) {
   return true;
 }
 
-export function beginSecondChance(attempt) {
+export function beginSecondChance(attempt, random = Math.random) {
   if (!attempt.secondChance || isSecondRound(attempt) || !attempt.wrongOrder.length) return false;
   attempt.round = 'second-intro';
   attempt.queue = [...attempt.wrongOrder];
   attempt.deferred = [];
   attempt.index = attempt.queue[0];
+  attempt.retryOptionOrder = [];
+  for (const index of attempt.wrongOrder) {
+    const question = attempt.questions[index];
+    const order = shuffle(question.options.map((_, position) => position), random);
+    const correctPosition = question.options.findIndex(option => option.id === question.correctOptionId);
+    // A random shuffle alone can leave the correct answer in its previous slot.
+    if (order[correctPosition] === correctPosition) {
+      const other = (correctPosition + 1 + Math.floor(random() * (order.length - 1))) % order.length;
+      [order[correctPosition], order[other]] = [order[other], order[correctPosition]];
+    }
+    attempt.retryOptionOrder[index] = order;
+  }
   return true;
 }
 

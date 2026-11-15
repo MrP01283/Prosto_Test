@@ -29,11 +29,14 @@ export function validAttemptSnapshot(saved,quizId,preview=false) {
     if(saved.round!==undefined&&!['first','second-intro','second'].includes(saved.round))return false;
     if((saved.retryAnswers!==undefined&&!Array.isArray(saved.retryAnswers))||
       (saved.wrongOrder!==undefined&&!Array.isArray(saved.wrongOrder)))return false;
+    if(saved.retryOptionOrder!==undefined&&!Array.isArray(saved.retryOptionOrder))return false;
     const second=restoreSecondChance(saved),wrongIndices=new Set(second.wrongOrder);
     if(second.retryAnswers.length>saved.questions.length||wrongIndices.size!==second.wrongOrder.length||
       second.wrongOrder.some(index=>!Number.isInteger(index)||index<0||index>=saved.questions.length))return false;
     if(!second.secondChance&&(second.round!=='first'||second.wrongOrder.length||second.retryAnswers.length))return false;
     if(second.round==='first'&&second.retryAnswers.length)return false;
+    if(second.retryOptionOrder.length>saved.questions.length||
+      (second.round==='first'&&second.retryOptionOrder.length))return false;
     if(isSecondRound(second)&&(!second.wrongOrder.length||saved.queue===undefined))return false;
     const active=currentAnswers({...saved,...second});
     const {queue,deferred}=restoreQuestionQueue(saved),pending=new Set(queue);
@@ -52,6 +55,9 @@ export function validAttemptSnapshot(saved,quizId,preview=false) {
       const wrong=saved.answers[i]!==undefined&&saved.answers[i]!==q.correctOptionId;
       if(second.secondChance&&wrongIndices.has(i)!==wrong)return false;
       if(second.retryAnswers[i]!==undefined&&(!wrongIndices.has(i)||!q.options.some(o=>o.id===second.retryAnswers[i])))return false;
+      const order=second.retryOptionOrder[i];
+      if(order!==undefined&&(!wrongIndices.has(i)||order.length!==q.options.length||
+        new Set(order).size!==order.length||order.some(position=>!Number.isInteger(position)||position<0||position>=q.options.length)))return false;
       if(!isSecondRound(second)||wrongIndices.has(i)){
         if(!pending.has(i)&&typeof active[i]!=='string')return false;
         if(pending.has(i)&&i!==saved.index&&active[i]!==undefined)return false;

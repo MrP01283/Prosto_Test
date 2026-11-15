@@ -4,7 +4,7 @@ import {newQuiz, newQuestion, prepareQuestions, makeResult} from '../src/core.js
 import {snapshotAttempt, snapshotProgress, validAttemptSnapshot} from '../src/attempt-progress.js';
 import {restoreQuestionQueue, restoreSecondChance, currentAnswers, recordAttemptAnswer,
   deferCurrentQuestion, advanceQuestionQueue, answeredQuestionCount,
-  beginSecondChance, addSecondChanceResult} from '../src/question-queue.js';
+  beginSecondChance, addSecondChanceResult, currentOptions} from '../src/question-queue.js';
 
 function attempt() {
   const quiz=newQuiz();
@@ -99,7 +99,7 @@ test('corrupt round state is rejected while legacy attempts still restore',()=>{
   const old=snapshotAttempt(legacy);
   for(const key of ['secondChance','round','wrongOrder','retryAnswers'])delete old[key];
   assert.equal(validAttemptSnapshot(old,legacy.quiz.id),true);
-  assert.deepEqual(restoreSecondChance(old),{secondChance:false,round:'first',wrongOrder:[],retryAnswers:[]});
+  assert.deepEqual(restoreSecondChance(old),{secondChance:false,round:'first',wrongOrder:[],retryAnswers:[],retryOptionOrder:[]});
 });
 
 test('disabled mode and an error-free first round never start another round',()=>{
@@ -112,4 +112,30 @@ test('disabled mode and an error-free first round never start another round',()=
   assert.equal(beginSecondChance(clean),false);
   assert.equal(result(clean).percent,100);
   assert.equal(result(clean).secondChance.total,0);
+});
+
+test('second chance moves the correct answer and persists its option order without changing first-round questions',()=>{
+  const state=firstRound(),original=structuredClone(state.questions);
+  // This random source produces an unchanged Fisher-Yates permutation.
+  beginSecondChance(state,()=>0.999);
+  for(const index of state.wrongOrder){
+    state.index=index;
+    const options=currentOptions(state),first=state.questions[index].options;
+    assert.deepEqual(options.map(o=>o.id).sort(),first.map(o=>o.id).sort());
+    assert.notEqual(options.findIndex(o=>o.id===state.questions[index].correctOptionId),
+      first.findIndex(o=>o.id===state.questions[index].correctOptionId));
+  }
+  state.index=state.queue[0];
+  const saved=snapshotAttempt(state);
+  assert.equal(validAttemptSnapshot(saved,state.quiz.id),true);
+  state.round='second';
+  const order=currentOptions(state).map(o=>o.id);
+  const checkpoint=snapshotProgress(state);
+  assert.deepEqual(currentOptions({...saved,...checkpoint}).map(o=>o.id),order);
+  deferCurrentQuestion(state);
+  while(state.index!==saved.index)deferCurrentQuestion(state);
+  assert.deepEqual(currentOptions(state).map(o=>o.id),order);
+  assert.deepEqual(state.questions,original);
+  const invalid=structuredClone(saved);invalid.retryOptionOrder[state.index]=[0,0,1,2,3];
+  assert.equal(validAttemptSnapshot(invalid,state.quiz.id),false);
 });
